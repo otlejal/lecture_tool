@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конспект лекции</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem;
+         color: #222; line-height: 1.55; }
+  h1 { border-bottom: 3px solid #3b6ea8; padding-bottom: .3rem; }
+  h2 { color: #3b6ea8; margin-top: 2rem; }
+  .overview { background: #f3f7fb; border-left: 4px solid #3b6ea8; padding: .8rem 1rem; border-radius: 4px; }
+  dt { font-weight: 600; margin-top: .7rem; }
+  dd { margin: .1rem 0 0 1rem; }
+  @media print { body { margin: 0; } h2 { break-after: avoid; } }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script id="data" type="application/json">{{DATA}}</script>
+<script>
+  const data = JSON.parse(document.getElementById("data").textContent);
+  const app = document.getElementById("app");
+
+  function el(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  app.append(el("h1", data.title));
+  if (data.overview) app.append(el("p", data.overview, "overview"));
+
+  for (const section of data.sections || []) {
+    app.append(el("h2", section.heading));
+    const list = el("ul");
+    for (const point of section.points || []) list.append(el("li", point));
+    app.append(list);
+  }
+
+  if ((data.terms || []).length) {
+    app.append(el("h2", "Термины"));
+    const dl = el("dl");
+    for (const item of data.terms) {
+      dl.append(el("dt", item.term), el("dd", item.definition));
+    }
+    app.append(dl);
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тест</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem;
+         color: #222; line-height: 1.5; }
+  h1 { border-bottom: 3px solid #3b6ea8; padding-bottom: .3rem; }
+  .question { background: #fff; border: 1px solid #d5dde8; border-radius: 8px; padding: 1rem 1.2rem;
+              margin: 1rem 0; }
+  .question.ok { border-color: #2e8b57; background: #f1faf4; }
+  .question.bad { border-color: #c0392b; background: #fdf2f1; }
+  .q-text { font-weight: 600; margin: 0 0 .3rem; }
+  .hint { color: #667; font-size: .9rem; margin: 0 0 .5rem; }
+  .option { display: block; padding: .35rem .5rem; border-radius: 4px; cursor: pointer; }
+  .option.correct { background: #d4f3dd; }
+  .option.wrong { background: #f8d7d3; }
+  .explanation { margin: .6rem 0 0; padding: .5rem .7rem; background: #fffbe6; border-radius: 4px;
+                 font-size: .95rem; }
+  .actions { margin: 1.5rem 0; display: flex; gap: .8rem; align-items: center; }
+  button { font-size: 1rem; padding: .5rem 1.2rem; border-radius: 6px; border: 0; background: #3b6ea8;
+           color: #fff; cursor: pointer; }
+  button:disabled { background: #9aa9bb; cursor: default; }
+  button.secondary { background: #e4eaf2; color: #223; }
+  .score { font-size: 1.15rem; font-weight: 600; }
+  @media print { .actions { display: none; } }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script id="data" type="application/json">{{DATA}}</script>
+<script>
+  const quiz = JSON.parse(document.getElementById("data").textContent);
+  const app = document.getElementById("app");
+  const questions = quiz.questions || [];
+  const cards = [];
+  const labels = [];
+  const explanations = [];
+
+  function el(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  const HINTS = {
+    single: "Выберите один ответ",
+    multiple: "Выберите все правильные ответы",
+    true_false: "Утверждение верно или неверно?",
+  };
+
+  const form = el("form");
+  app.append(el("h1", quiz.title || "Тест"));
+
+  questions.forEach((q, qi) => {
+    const card = el("section", undefined, "question");
+    card.append(el("p", `${qi + 1}. ${q.question}`, "q-text"));
+    card.append(el("p", HINTS[q.type] || "", "hint"));
+
+    labels[qi] = [];
+    q.options.forEach((text, oi) => {
+      const label = el("label", undefined, "option");
+      const input = document.createElement("input");
+      input.type = q.type === "multiple" ? "checkbox" : "radio";
+      input.name = "q" + qi;
+      input.value = String(oi);
+      label.append(input, document.createTextNode(" " + text));
+      card.append(label);
+      labels[qi].push(label);
+    });
+
+    const explanation = el("p", q.explanation || "", "explanation");
+    explanation.hidden = true;
+    explanations[qi] = explanation;
+    card.append(explanation);
+
+    cards.push(card);
+    form.append(card);
+  });
+  app.append(form);
+
+  const score = el("p", "", "score");
+  const checkButton = el("button", "Проверить");
+  checkButton.type = "button";
+  const resetButton = el("button", "Сбросить", "secondary");
+  resetButton.type = "button";
+  const actions = el("div", undefined, "actions");
+  actions.append(checkButton, resetButton, score);
+  app.append(actions);
+
+  function checkAnswers() {
+    let correctCount = 0;
+    questions.forEach((q, qi) => {
+      const chosen = [...form.querySelectorAll(`input[name="q${qi}"]:checked`)]
+        .map((input) => Number(input.value))
+        .sort((a, b) => a - b);
+      const right = [...q.correct].sort((a, b) => a - b);
+      const ok = chosen.length === right.length && chosen.every((v, i) => v === right[i]);
+      if (ok) correctCount++;
+
+      labels[qi].forEach((label, oi) => {
+        label.classList.toggle("correct", right.includes(oi));
+        label.classList.toggle("wrong", chosen.includes(oi) && !right.includes(oi));
+      });
+      cards[qi].classList.toggle("ok", ok);
+      cards[qi].classList.toggle("bad", !ok);
+      explanations[qi].hidden = false;
+    });
+    score.textContent = `Результат: ${correctCount} из ${questions.length}`;
+    checkButton.disabled = true;
+  }
+
+  function resetQuiz() {
+    form.reset();
+    questions.forEach((_, qi) => {
+      labels[qi].forEach((label) => label.classList.remove("correct", "wrong"));
+      cards[qi].classList.remove("ok", "bad");
+      explanations[qi].hidden = true;
+    });
+    score.textContent = "";
+    checkButton.disabled = false;
+  }
+
+  checkButton.addEventListener("click", checkAnswers);
+  resetButton.addEventListener("click", resetQuiz);
+</script>
+</body>
+</html>

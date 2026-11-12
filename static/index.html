@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лекционный помощник</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Лекционный помощник</h1>
+  <div class="lecture-bar">
+    <label>Лекция:
+      <select id="lecture-select"></select>
+    </label>
+    <input id="new-title" placeholder="Название новой лекции">
+    <button id="new-lecture">Создать лекцию</button>
+  </div>
+  <nav>
+    <button class="tab active" data-tab="record">1. Запись и текст</button>
+    <button class="tab" data-tab="summary">2. Конспект</button>
+    <button class="tab" data-tab="quiz">3. Тест</button>
+    <button class="tab" data-tab="settings">Настройки</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===== Блок 1: запись и распознавание ===== -->
+  <section id="tab-record" class="tab-panel active">
+    <div class="card">
+      <h2>Запись лекции</h2>
+      <p class="hint">Запись идёт с микрофона, который выбран в браузере. Страница должна быть открыта на этом компьютере.</p>
+      <div class="row">
+        <button id="rec-start">● Начать запись</button>
+        <button id="rec-pause" disabled>Пауза</button>
+        <button id="rec-stop" class="secondary" disabled>■ Стоп</button>
+        <span id="rec-timer" class="timer">00:00:00</span>
+      </div>
+      <p id="rec-status" class="hint"></p>
+    </div>
+
+    <div class="card">
+      <h2>Или загрузить готовый файл</h2>
+      <div class="row">
+        <input type="file" id="audio-file" accept="audio/*,video/*">
+        <button id="upload-audio">Загрузить</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Распознавание речи</h2>
+      <p>Режим: <b id="asr-mode">-</b> <span class="hint">(меняется в настройках)</span></p>
+      <div class="row">
+        <button id="transcribe" disabled>Распознать аудио</button>
+        <span id="transcribe-status" class="hint"></span>
+      </div>
+      <h3>Текст лекции</h3>
+      <textarea id="transcript" rows="16" placeholder="Здесь появится текст после распознавания. Его можно поправить вручную."></textarea>
+      <div class="row">
+        <button id="save-transcript" class="secondary">Сохранить текст</button>
+        <a id="download-transcript" class="link" download hidden>Скачать .txt</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Блок 2: конспект ===== -->
+  <section id="tab-summary" class="tab-panel">
+    <div class="card">
+      <h2>Источник текста</h2>
+      <label class="radio"><input type="radio" name="sum-source" value="lecture" checked> Текст этой лекции (с прошлого блока)</label>
+      <label class="radio"><input type="radio" name="sum-source" value="text"> Свой текст или файл</label>
+      <div id="sum-text-box" hidden>
+        <div class="row">
+          <input type="file" id="sum-file" accept=".txt,.html,.htm,.md">
+          <span class="hint">Файлы .html тоже подходят: текст берётся из них автоматически.</span>
+        </div>
+        <textarea id="sum-text" rows="8" placeholder="Или вставьте текст сюда"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Настройки конспекта</h2>
+      <div class="grid">
+        <label>Объём
+          <select id="sum-length">
+            <option value="full">Полный</option>
+            <option value="short">Краткий</option>
+          </select>
+        </label>
+        <label>Шаблон оформления
+          <select id="sum-template"></select>
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" id="sum-offtopic"> Учитывать разговоры не по теме (отдельным разделом)</label>
+      <label class="check"><input type="checkbox" id="sum-filler" checked> Убирать слова-паразиты, повторы и оговорки</label>
+      <label class="check"><input type="checkbox" id="sum-examples" checked> Сохранять примеры</label>
+      <label>Дополнительные пожелания
+        <textarea id="sum-extra" rows="3" placeholder="Например: выделить определения жирным, сделать упор на формулы, писать в виде таблиц"></textarea>
+      </label>
+      <div class="row">
+        <button id="sum-run">Сделать конспект</button>
+        <span id="sum-status" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Результат</h2>
+      <div class="row">
+        <button id="sum-rerender" class="secondary">Перерисовать выбранным шаблоном</button>
+        <a id="sum-download" class="link" download hidden>Скачать summary.html</a>
+      </div>
+      <iframe id="sum-preview" title="Конспект"></iframe>
+    </div>
+
+    <div class="card">
+      <h2>Свой шаблон конспекта</h2>
+      <p class="hint">Шаблон — это HTML-файл. Внутри должна быть метка <code>{{DATA}}</code> в блоке
+        <code>&lt;script id="data" type="application/json"&gt;</code>. Стандартный шаблон лежит в папке
+        <code>templates/summary_default.html</code>: скопируйте его и измените оформление.</p>
+      <div class="row">
+        <input type="file" id="sum-tpl-file" accept=".html,.htm">
+        <input id="sum-tpl-name" placeholder="Имя шаблона, например «школа»">
+        <button id="sum-tpl-save" class="secondary">Сохранить шаблон</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Блок 3: тест ===== -->
+  <section id="tab-quiz" class="tab-panel">
+    <div class="card">
+      <h2>Источник материала</h2>
+      <label class="radio"><input type="radio" name="quiz-source" value="lecture" checked> Конспект этой лекции (summary)</label>
+      <label class="radio"><input type="radio" name="quiz-source" value="text"> Свой текст или готовый HTML-конспект</label>
+      <div id="quiz-text-box" hidden>
+        <div class="row">
+          <input type="file" id="quiz-file" accept=".txt,.html,.htm,.md">
+          <span class="hint">Можно загрузить ранее созданный конспект в формате .html.</span>
+        </div>
+        <textarea id="quiz-text" rows="8" placeholder="Или вставьте текст сюда"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Настройки теста</h2>
+      <div class="grid">
+        <label>Количество вопросов
+          <input type="number" id="quiz-count" min="1" max="50" value="10">
+        </label>
+        <label>Сложность
+          <select id="quiz-difficulty">
+            <option value="easy">Лёгкая</option>
+            <option value="medium" selected>Средняя</option>
+            <option value="hard">Сложная</option>
+          </select>
+        </label>
+        <label>Шаблон оформления
+          <select id="quiz-template"></select>
+        </label>
+      </div>
+      <p>Типы вопросов:</p>
+      <label class="check"><input type="checkbox" class="quiz-type" value="single" checked> Один правильный ответ</label>
+      <label class="check"><input type="checkbox" class="quiz-type" value="multiple"> Несколько правильных ответов</label>
+      <label class="check"><input type="checkbox" class="quiz-type" value="true_false"> Верно / неверно</label>
+      <div class="row">
+        <button id="quiz-run">Создать тест</button>
+        <span id="quiz-status" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Результат</h2>
+      <div class="row">
+        <button id="quiz-rerender" class="secondary">Перерисовать выбранным шаблоном</button>
+        <a id="quiz-download" class="link" download hidden>Скачать quiz.html</a>
+      </div>
+      <iframe id="quiz-preview" title="Тест"></iframe>
+    </div>
+
+    <div class="card">
+      <h2>Свой шаблон теста</h2>
+      <p class="hint">Требования такие же, как у шаблона конспекта. Стандартный шаблон: <code>templates/quiz_default.html</code>.</p>
+      <div class="row">
+        <input type="file" id="quiz-tpl-file" accept=".html,.htm">
+        <input id="quiz-tpl-name" placeholder="Имя шаблона, например «темно»">
+        <button id="quiz-tpl-save" class="secondary">Сохранить шаблон</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Настройки ===== -->
+  <section id="tab-settings" class="tab-panel">
+    <div class="card">
+      <h2>Распознавание речи (Whisper)</h2>
+      <label>Где работает whisper
+        <select id="tr-backend">
+          <option value="local">Локально, на этом компьютере</option>
+          <option value="remote">На удалённом сервере</option>
+        </select>
+      </label>
+
+      <fieldset id="tr-local">
+        <legend>Локальный whisper</legend>
+        <div class="grid">
+          <label>Модель
+            <input id="tr-local-model" list="whisper-models">
+          </label>
+          <label>Устройство
+            <select id="tr-local-device">
+              <option value="cuda">GPU (cuda)</option>
+              <option value="cpu">CPU</option>
+            </select>
+          </label>
+          <label>Точность вычислений
+            <select id="tr-local-compute">
+              <option value="float16">float16 (GPU)</option>
+              <option value="int8_float16">int8_float16 (GPU, меньше памяти)</option>
+              <option value="int8">int8 (CPU)</option>
+              <option value="float32">float32</option>
+            </select>
+          </label>
+        </div>
+        <datalist id="whisper-models">
+          <option value="tiny"></option>
+          <option value="base"></option>
+          <option value="small"></option>
+          <option value="medium"></option>
+          <option value="large-v3"></option>
+        </datalist>
+      </fieldset>
+
+      <fieldset id="tr-remote" hidden>
+        <legend>Удалённый whisper (OpenAI-совместимый API)</legend>
+        <div class="grid">
+          <label>Адрес, включая /v1
+            <input id="tr-remote-url" placeholder="http://192.168.1.50:8000/v1">
+          </label>
+          <label>Модель
+            <input id="tr-remote-model" placeholder="large-v3">
+          </label>
+          <label>API-ключ (если нужен)
+            <input id="tr-remote-key" type="password">
+          </label>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="card">
+      <h2>Языковая модель (LLM)</h2>
+      <p class="hint">Любой сервер с OpenAI-совместимым API: Ollama, LM Studio, llama.cpp, vLLM.</p>
+      <div class="grid">
+        <label>Адрес, включая /v1
+          <input id="llm-url" placeholder="http://192.168.1.20:11434/v1">
+        </label>
+        <label>Модель
+          <input id="llm-model" list="llm-models" placeholder="qwen2.5:14b">
+          <datalist id="llm-models"></datalist>
+        </label>
+        <label>API-ключ
+          <input id="llm-key" type="password">
+        </label>
+        <label>Температура
+          <input id="llm-temp" type="number" step="0.1" min="0" max="2">
+        </label>
+        <label>Размер части для длинных текстов (символов)
+          <input id="llm-chunk" type="number" min="2000" step="1000">
+        </label>
+      </div>
+      <div class="row">
+        <button id="llm-check" class="secondary">Проверить подключение</button>
+        <span id="llm-check-result" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Общие</h2>
+      <label>Язык распознавания
+        <input id="language" placeholder="ru">
+      </label>
+      <div class="row">
+        <button id="settings-save">Сохранить настройки</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
