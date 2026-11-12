@@ -10,11 +10,24 @@
 <header>
   <h1>Лекционный помощник</h1>
   <div class="lecture-bar">
-    <label>Лекция:
+    <label>Группа:
+      <input id="new-group" list="group-list" placeholder="например, ИТ-21">
+      <datalist id="group-list"></datalist>
+    </label>
+    <label>Предмет:
+      <input id="new-subject" list="subject-list" placeholder="например, Математика">
+      <datalist id="subject-list"></datalist>
+    </label>
+    <label>Название темы:
+      <input id="new-title" placeholder="например, Ряды Фурье">
+    </label>
+    <button id="new-lecture">Создать тему</button>
+  </div>
+  <div class="lecture-bar">
+    <label>Тема:
       <select id="lecture-select"></select>
     </label>
-    <input id="new-title" placeholder="Название новой лекции">
-    <button id="new-lecture">Создать лекцию</button>
+    <button id="delete-lecture" class="secondary" disabled>Удалить</button>
   </div>
   <nav>
     <button class="tab active" data-tab="record">1. Запись и текст</button>
@@ -202,7 +215,16 @@
         <legend>Локальный whisper</legend>
         <div class="grid">
           <label>Модель
-            <input id="tr-local-model" list="whisper-models">
+            <select id="tr-local-model">
+              <option value="tiny">tiny — самая быстрая, менее точная</option>
+              <option value="base">base — быстрая</option>
+              <option value="small">small — средняя</option>
+              <option value="medium">medium — точная, медленная</option>
+              <option value="large-v2">large-v2 — очень точная, медленная</option>
+              <option value="large-v3">large-v3 — очень точная, медленная</option>
+              <option value="large-v3-turbo">large-v3-turbo — точная и быстрая</option>
+              <option value="distil-large-v3">distil-large-v3 — быстрая (только английский)</option>
+            </select>
           </label>
           <label>Устройство
             <select id="tr-local-device">
@@ -212,20 +234,32 @@
           </label>
           <label>Точность вычислений
             <select id="tr-local-compute">
-              <option value="float16">float16 (GPU)</option>
+              <option value="float16">float16 (GPU — лучший выбор)</option>
               <option value="int8_float16">int8_float16 (GPU, меньше памяти)</option>
-              <option value="int8">int8 (CPU)</option>
-              <option value="float32">float32</option>
+              <option value="int8">int8 (CPU — лучший выбор)</option>
+              <option value="float32">float32 (без ускорения)</option>
             </select>
           </label>
+          <label>Размер батча (ускоряет GPU и многоядерный CPU)
+            <input id="tr-local-batch" type="number" min="1" max="32" step="1" value="8">
+          </label>
+          <label class="check"><input type="checkbox" id="tr-local-vad" checked> Вырезать тишину (VAD):
+            быстрее на длинных записях и без «галлюцинаций» на паузах</label>
         </div>
-        <datalist id="whisper-models">
-          <option value="tiny"></option>
-          <option value="base"></option>
-          <option value="small"></option>
-          <option value="medium"></option>
-          <option value="large-v3"></option>
-        </datalist>
+        <p class="hint">Модель скачивается автоматически при первом запуске. Для GPU (cuda) нужны библиотеки
+          cuBLAS и cuDNN: .venv\Scripts\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12</p>
+        <div class="grid">
+          <label>Модели на диске
+            <span id="whisper-disk" class="hint">-</span>
+          </label>
+          <label>Загружено в память
+            <span id="whisper-memory" class="hint">-</span>
+          </label>
+        </div>
+        <div class="row">
+          <button id="whisper-unload" class="secondary" disabled>Выгрузить модель из памяти</button>
+          <span class="hint">При распознавании новой модели предыдущая выгружается автоматически</span>
+        </div>
       </fieldset>
 
       <fieldset id="tr-remote" hidden>
@@ -253,6 +287,7 @@
         </label>
         <label>Модель
           <input id="llm-model" list="llm-models" placeholder="qwen2.5:14b">
+          <select id="llm-model-select" hidden></select>
           <datalist id="llm-models"></datalist>
         </label>
         <label>API-ключ
@@ -274,11 +309,25 @@
     <div class="card">
       <h2>Общие</h2>
       <label>Язык распознавания
-        <input id="language" placeholder="ru">
+        <select id="language">
+          <option value="ru">Русский</option>
+          <option value="en">English (английский)</option>
+          <option value="uk">Українська (украинский)</option>
+          <option value="be">Беларуская (белорусский)</option>
+          <option value="kk">Қазақша (казахский)</option>
+          <option value="uz">Oʻzbekcha (узбекский)</option>
+          <option value="de">Deutsch (немецкий)</option>
+          <option value="fr">Français (французский)</option>
+          <option value="es">Español (испанский)</option>
+          <option value="it">Italiano (итальянский)</option>
+          <option value="pl">Polski (польский)</option>
+          <option value="tr">Türkçe (турецкий)</option>
+          <option value="zh">中文 (китайский)</option>
+          <option value="ja">日本語 (японский)</option>
+          <option value="ko">한국어 (корейский)</option>
+        </select>
       </label>
-      <div class="row">
-        <button id="settings-save">Сохранить настройки</button>
-      </div>
+      <p class="hint" id="settings-status">Изменения сохраняются автоматически</p>
     </div>
   </section>
 </main>

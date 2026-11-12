@@ -1,0 +1,5 @@
+# CUDA-библиотеки для локального faster-whisper на GPU (Windows/Linux).
+# Нужны только если в настройках выбрано устройство cuda.
+# Установка: .venv\Scripts\python.exe -m pip install -r requirements-cuda.txt
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

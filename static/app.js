@@ -96,15 +96,34 @@ function describeAsr() {
     : `удалённо, ${t.remote.base_url}`;
 }
 
+function lectureLabel(l) {
+  const topic = l.title && l.title !== l.id ? l.title : l.id;
+  return `${l.group || "Без группы"} / ${l.subject || "Без предмета"} — ${topic}`;
+}
+
 async function loadLectures(preferId) {
   const list = await api("/lectures");
   const select = $("lecture-select");
   select.innerHTML = "";
+  const groups = new Set();
+  const subjects = new Set();
   for (const lecture of list) {
     const option = document.createElement("option");
     option.value = lecture.id;
-    option.textContent = `${lecture.title} (${lecture.id})`;
+    option.textContent = lectureLabel(lecture);
     select.append(option);
+    if (lecture.group) groups.add(lecture.group);
+    if (lecture.subject) subjects.add(lecture.subject);
+  }
+  // Подсказки для полей Группа/Предмет из уже используемых значений
+  for (const [listId, values] of [["group-list", groups], ["subject-list", subjects]]) {
+    const datalist = $(listId);
+    datalist.innerHTML = "";
+    for (const value of values) {
+      const option = document.createElement("option");
+      option.value = value;
+      datalist.append(option);
+    }
   }
   const wanted = [preferId, localStorage.getItem("lectureId")].find((id) => id && list.some((l) => l.id === id));
   if (wanted) select.value = wanted;
@@ -116,7 +135,7 @@ async function loadLectures(preferId) {
 async function refreshLecture() {
   const hasLecture = Boolean(state.lectureId);
   for (const id of ["rec-start", "upload-audio", "save-transcript", "sum-run", "sum-rerender",
-                    "sum-tpl-save", "quiz-run", "quiz-rerender"]) {
+                    "sum-tpl-save", "quiz-run", "quiz-rerender", "delete-lecture"]) {
     $(id).disabled = !hasLecture;
   }
   $("asr-mode").textContent = describeAsr();
@@ -146,10 +165,29 @@ $("lecture-select").addEventListener("change", (e) => {
 
 $("new-lecture").addEventListener("click", async () => {
   try {
-    const lecture = await postJson("/lectures", { title: $("new-title").value });
-    $("new-title").value = "";
+    const lecture = await postJson("/lectures", {
+      title: $("new-title").value,
+      group: $("new-group").value,
+      subject: $("new-subject").value,
+    });
+    $("new-title").value = ""; // группу и предмет оставляем — обычно пары идут подряд
     await loadLectures(lecture.id);
-    toast("Лекция создана");
+    toast("Тема создана");
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+$("delete-lecture").addEventListener("click", async () => {
+  if (!state.lectureId) return;
+  const title = $("lecture-select").selectedOptions[0]?.textContent || state.lectureId;
+  if (!confirm(`Удалить тему «${title}» со всеми файлами (аудио, конспект, тест)?`)) return;
+  try {
+    await api(`/lectures/${state.lectureId}`, { method: "DELETE" });
+    localStorage.removeItem("lectureId");
+    state.lectureId = null;
+    await loadLectures();
+    toast("Тема удалена");
   } catch (err) {
     toast(err.message, true);
   }
@@ -190,7 +228,7 @@ async function finishRecording() {
 }
 
 $("rec-start").addEventListener("click", async () => {
-  if (!state.lectureId) return toast("Сначала создайте лекцию", true);
+  if (!state.lectureId) return toast("Сначала создайте тему", true);
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
@@ -410,13 +448,45 @@ function updateAsrVisibility() {
   $("tr-remote").hidden = local;
 }
 
+async function loadWhisperStatus() {
+  const st = await api("/whisper/status");
+  $("whisper-disk").textContent = st.disk.length
+    ? st.disk.map((d) => `${d.name} (${d.size_gb} ГБ)`).join(", ")
+    : "пока ничего не скачано";
+  const mem = st.memory[0];
+  $("whisper-memory").textContent = mem
+    ? `${mem.model} (${mem.device}, ${mem.compute_type})`
+    : "ничего не загружено";
+  $("whisper-unload").disabled = !mem;
+}
+
+$("whisper-unload").addEventListener("click", async () => {
+  try {
+    await postJson("/whisper/unload", {});
+    toast("Модель выгружена из памяти");
+    await loadWhisperStatus();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
 async function loadSettings() {
   const s = await api("/settings");
   state.settings = s;
   $("tr-backend").value = s.transcription.backend;
-  $("tr-local-model").value = s.transcription.local.model;
+  // Если в config.yaml указана нестандартная модель — добавляем её в список, чтобы не потерять
+  const modelSelect = $("tr-local-model");
+  if (![...modelSelect.options].some((o) => o.value === s.transcription.local.model)) {
+    const option = document.createElement("option");
+    option.value = s.transcription.local.model;
+    option.textContent = s.transcription.local.model;
+    modelSelect.append(option);
+  }
+  modelSelect.value = s.transcription.local.model;
   $("tr-local-device").value = s.transcription.local.device;
   $("tr-local-compute").value = s.transcription.local.compute_type;
+  $("tr-local-batch").value = s.transcription.local.batch_size ?? 8;
+  $("tr-local-vad").checked = s.transcription.local.vad_filter !== false;
   $("tr-remote-url").value = s.transcription.remote.base_url;
   $("tr-remote-model").value = s.transcription.remote.model;
   $("tr-remote-key").value = s.transcription.remote.api_key;
@@ -425,35 +495,69 @@ async function loadSettings() {
   $("llm-key").value = s.llm.api_key;
   $("llm-temp").value = s.llm.temperature;
   $("llm-chunk").value = s.llm.max_chunk_chars;
-  $("language").value = s.language;
+  // Нестандартный язык из config.yaml добавляем в список, чтобы не потерять
+  const langSelect = $("language");
+  if (![...langSelect.options].some((o) => o.value === s.language)) {
+    const option = document.createElement("option");
+    option.value = s.language;
+    option.textContent = s.language;
+    langSelect.append(option);
+  }
+  langSelect.value = s.language;
   updateAsrVisibility();
+  loadWhisperStatus().catch((e) => toast(e.message, true));
 }
 
 $("tr-backend").addEventListener("change", updateAsrVisibility);
 
-$("settings-save").addEventListener("click", async () => {
+// ---------- автосохранение настроек ----------
+
+function collectSettings() {
   const s = structuredClone(state.settings);
   s.language = $("language").value.trim() || "ru";
   s.transcription.backend = $("tr-backend").value;
   s.transcription.local.model = $("tr-local-model").value.trim();
   s.transcription.local.device = $("tr-local-device").value;
   s.transcription.local.compute_type = $("tr-local-compute").value;
+  s.transcription.local.batch_size = Math.max(1, Math.round(Number($("tr-local-batch").value) || 8));
+  s.transcription.local.vad_filter = $("tr-local-vad").checked;
   s.transcription.remote.base_url = $("tr-remote-url").value.trim();
   s.transcription.remote.model = $("tr-remote-model").value.trim();
   s.transcription.remote.api_key = $("tr-remote-key").value;
   s.llm.base_url = $("llm-url").value.trim();
-  s.llm.model = $("llm-model").value.trim();
+  const modelSelect = $("llm-model-select");
+  s.llm.model = (modelSelect.hidden ? $("llm-model").value : modelSelect.value).trim();
   s.llm.api_key = $("llm-key").value;
   s.llm.temperature = Number($("llm-temp").value);
   s.llm.max_chunk_chars = Number($("llm-chunk").value);
+  return s;
+}
+
+let saveTimer = null;
+
+function scheduleSettingsSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSettingsNow, 700); // пауза, чтобы не сохранять на каждом нажатии клавиши
+}
+
+async function saveSettingsNow() {
   try {
-    state.settings = await putJson("/settings", s);
-    toast("Настройки сохранены");
+    state.settings = await putJson("/settings", collectSettings());
+    $("settings-status").textContent = "Настройки сохранены ✓";
     $("asr-mode").textContent = describeAsr();
   } catch (err) {
-    toast(err.message, true);
+    toast("Не удалось сохранить настройки: " + err.message, true);
   }
-});
+}
+
+// Любое изменение в настройках сохраняется само
+for (const id of ["tr-backend", "tr-local-model", "tr-local-device", "tr-local-compute",
+                  "tr-local-batch", "tr-local-vad", "tr-remote-url", "tr-remote-model",
+                  "tr-remote-key", "llm-url", "llm-model", "llm-model-select", "llm-key",
+                  "llm-temp", "llm-chunk", "language"]) {
+  $(id).addEventListener("input", scheduleSettingsSave);
+  $(id).addEventListener("change", scheduleSettingsSave);
+}
 
 $("llm-check").addEventListener("click", async () => {
   const result = $("llm-check-result");
@@ -464,19 +568,45 @@ $("llm-check").addEventListener("click", async () => {
     api_key: $("llm-key").value,
   };
   const resp = await postJson("/llm/check", body);
+  if (!resp.ok) {
+    result.textContent = `Ошибка: ${resp.error}`;
+    return;
+  }
+  if (!resp.models.length) {
+    result.textContent = "Подключение есть, но сервер не вернул список моделей";
+    return;
+  }
+  // Показываем выбор из всех моделей сервера выпадающим списком
+  const select = $("llm-model-select");
+  select.innerHTML = "";
+  for (const model of resp.models) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    select.append(option);
+  }
+  const current = $("llm-model").value.trim();
+  if (current && resp.models.includes(current)) select.value = current;
+  $("llm-model").hidden = true;
+  select.hidden = false;
+  // Дублируем список и в подсказку обычного поля ввода
   const list = $("llm-models");
   list.innerHTML = "";
-  if (resp.ok) {
-    for (const model of resp.models) {
-      const option = document.createElement("option");
-      option.value = model;
-      list.append(option);
-    }
-    result.textContent = `Подключение есть, моделей: ${resp.models.length}`;
-  } else {
-    result.textContent = `Ошибка: ${resp.error}`;
+  for (const model of resp.models) {
+    const option = document.createElement("option");
+    option.value = model;
+    list.append(option);
   }
+  result.textContent = `Подключение есть, доступно моделей: ${resp.models.length}`;
 });
+
+// При смене адреса или ключа список моделей устаревает — возвращаем поле ввода
+for (const id of ["llm-url", "llm-key"]) {
+  $(id).addEventListener("input", () => {
+    $("llm-model-select").hidden = true;
+    $("llm-model").hidden = false;
+  });
+}
 
 // ---------- старт ----------
 

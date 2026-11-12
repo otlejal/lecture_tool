@@ -13,6 +13,8 @@ class LocalWhisperConfig(BaseModel):
     model: str = "medium"
     device: str = "cuda"
     compute_type: str = "float16"
+    batch_size: int = Field(default=8, ge=1)
+    vad_filter: bool = True
 
 
 class RemoteWhisperConfig(BaseModel):

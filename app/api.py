@@ -25,6 +25,8 @@ DOWNLOADABLE = {
 
 class LectureIn(BaseModel):
     title: str = ""
+    group: str = ""
+    subject: str = ""
 
 
 class TranscriptIn(BaseModel):
@@ -62,7 +64,7 @@ def _folder(lecture_id: str) -> Path:
     try:
         return storage.get_folder(lectures_root(load_config()), lecture_id)
     except FileNotFoundError:
-        raise HTTPException(404, "Лекция не найдена")
+        raise HTTPException(404, "Тема не найдена")
 
 
 def _read_text(path: Path) -> str:
@@ -122,6 +124,19 @@ def check_llm(cfg: LLMConfig):
         return {"ok": False, "error": str(exc)}
 
 
+# ---------- статус whisper ----------
+
+@router.get("/whisper/status")
+def whisper_status():
+    return {"disk": transcriber.downloaded_models(), "memory": transcriber.loaded_models()}
+
+
+@router.post("/whisper/unload")
+def whisper_unload():
+    removed = transcriber.unload_local_model()
+    return {"ok": True, "removed": removed}
+
+
 # ---------- лекции ----------
 
 @router.get("/lectures")
@@ -131,7 +146,13 @@ def list_lectures():
 
 @router.post("/lectures")
 def create_lecture(body: LectureIn):
-    return storage.create_lecture(lectures_root(load_config()), body.title)
+    return storage.create_lecture(lectures_root(load_config()), body.title, body.group, body.subject)
+
+
+@router.delete("/lectures/{lecture_id}")
+def delete_lecture(lecture_id: str):
+    storage.delete_lecture(lectures_root(load_config()), lecture_id)
+    return {"ok": True}
 
 
 @router.get("/lectures/{lecture_id}")

@@ -16,14 +16,19 @@ def test_fmt_time():
     assert fmt_time(3725.9) == "01:02:05"
 
 
+def _lecture_folder(lectures: Path, meta: dict) -> Path:
+    return lectures / meta["group"] / meta["subject"] / meta["id"]
+
+
 def test_remote_transcription(app_env):
     cfg = TranscriptionConfig(
         backend="remote",
         remote=RemoteWhisperConfig(base_url=app_env["base_url"], model="fake-whisper", timeout=30),
     )
     lectures = app_env["lectures"]
-    meta = create_lecture(lectures, "Тест")
-    folder = lectures / meta["id"]
+    meta = create_lecture(lectures, "Тест", group="Группа 1", subject="Предмет 1")
+    folder = _lecture_folder(lectures, meta)
+    assert folder.is_dir()
     (folder / "audio.webm").write_bytes(b"fake audio bytes")
 
     count = transcribe_lecture(folder, cfg, "ru", _silent)
@@ -41,8 +46,8 @@ def test_remote_error_is_reported(app_env):
         remote=RemoteWhisperConfig(base_url=app_env["base_url"] + "/fail", timeout=30),
     )
     lectures = app_env["lectures"]
-    meta = create_lecture(lectures, "Тест")
-    folder = lectures / meta["id"]
+    meta = create_lecture(lectures, "Тест", group="Группа 1", subject="Предмет 1")
+    folder = _lecture_folder(lectures, meta)
     (folder / "audio.wav").write_bytes(b"x")
     with pytest.raises(RuntimeError, match="500"):
         transcribe_lecture(folder, cfg, "ru", _silent)
