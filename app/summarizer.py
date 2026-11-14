@@ -5,6 +5,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, Field
 
 from app.llm import LLMClient
+from app.prompts import apply_template
 
 SYSTEM_PROMPT = (
     "Ты помощник преподавателя. Готовишь конспект по расшифровке лекции на русском языке. "
@@ -17,6 +18,9 @@ SCHEMA_HINT = """{
   "sections": [{"heading": "название раздела", "points": ["пункт", "пункт"]}],
   "terms": [{"term": "термин", "definition": "определение"}]
 }"""
+
+# Шаблон запроса по умолчанию: {{RULES}} — правила из настроек, {{TEXT}} — текст лекции.
+DEFAULT_PROMPT_TEMPLATE = "{{RULES}}\n\n{{TEXT}}"
 
 
 class SummaryOptions(BaseModel):
@@ -92,35 +96,41 @@ def _validate(data: dict) -> Summary:
     return summary
 
 
-def _ask(llm: LLMClient, rules: str, user_text: str) -> Summary:
+def _ask(llm: LLMClient, prompt: str) -> Summary:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"{rules}\n\n{user_text}"},
+        {"role": "user", "content": prompt},
     ]
     return llm.chat_json(messages, validate=_validate)
 
 
 def summarize(text: str, opts: SummaryOptions, llm: LLMClient,
+              prompt_template: str = "",
               progress: Callable[[str], None] = lambda _: None) -> Summary:
     rules = build_rules(opts)
+    template = prompt_template.strip() or DEFAULT_PROMPT_TEMPLATE
     max_chars = llm.cfg.max_chunk_chars
     if len(text) <= max_chars:
         progress("Составляю конспект...")
-        return _ask(llm, rules, f"Текст лекции:\n{text}")
+        return _ask(llm, apply_template(template, rules, f"Текст лекции:\n{text}"))
 
     chunks = split_text(text, max_chars)
     partials = []
     for i, chunk in enumerate(chunks, 1):
         progress(f"Конспект части {i} из {len(chunks)}...")
-        partials.append(_ask(llm, rules, f"Фрагмент лекции (часть {i} из {len(chunks)}):\n{chunk}"))
+        partials.append(_ask(llm, apply_template(
+            template, rules, f"Фрагмент лекции (часть {i} из {len(chunks)}):\n{chunk}")))
 
     progress("Объединяю части в общий конспект...")
     partials_json = json.dumps([p.model_dump() for p in partials], ensure_ascii=False)
     return _ask(
         llm,
-        rules,
-        "Ниже конспекты частей одной лекции в JSON. Объедини их в один конспект без повторов, "
-        f"сохранив порядок разделов:\n{partials_json}",
+        apply_template(
+            template,
+            rules,
+            "Ниже конспекты частей одной лекции в JSON. Объедини их в один конспект без повторов, "
+            f"сохранив порядок разделов:\n{partials_json}",
+        ),
     )
 
 

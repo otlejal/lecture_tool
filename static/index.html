@@ -103,6 +103,9 @@
         <label>Шаблон оформления
           <select id="sum-template"></select>
         </label>
+        <label>Мастер-промпт
+          <select id="sum-prompt"></select>
+        </label>
       </div>
       <label class="check"><input type="checkbox" id="sum-offtopic"> Учитывать разговоры не по теме (отдельным разделом)</label>
       <label class="check"><input type="checkbox" id="sum-filler" checked> Убирать слова-паразиты, повторы и оговорки</label>
@@ -114,6 +117,30 @@
         <button id="sum-run">Сделать конспект</button>
         <span id="sum-status" class="hint"></span>
       </div>
+
+      <details id="sum-prompt-box" class="prompt-box">
+        <summary>Мастер-промпт: предпросмотр и управление</summary>
+        <pre id="sum-prompt-preview" class="prompt-preview">-</pre>
+        <p class="hint">Предпросмотр обновляется при изменении настроек выше. Вместо метки {{TEXT}} показан условный текст — при генерации на её место встанет текст темы.</p>
+        <div class="row">
+          <button id="sum-prompt-new" class="secondary">Новый промпт</button>
+          <button id="sum-prompt-edit" class="secondary" disabled>Изменить выбранный</button>
+          <button id="sum-prompt-delete" class="secondary" disabled>Удалить выбранный</button>
+        </div>
+        <form id="sum-prompt-editor" hidden>
+          <label>Название
+            <input id="sum-prompt-name" required placeholder="например, «Строгий конспект»">
+          </label>
+          <label>Шаблон промпта
+            <textarea id="sum-prompt-template" rows="12" required></textarea>
+          </label>
+          <p class="hint">Метки в шаблоне: <code>{{RULES}}</code> — правила, собранные из настроек выше; <code>{{TEXT}}</code> — текст темы (обязательна).</p>
+          <div class="row">
+            <button type="submit">Сохранить промпт</button>
+            <button type="button" id="sum-prompt-cancel" class="secondary">Отмена</button>
+          </div>
+        </form>
+      </details>
     </div>
 
     <div class="card">
@@ -169,6 +196,9 @@
         <label>Шаблон оформления
           <select id="quiz-template"></select>
         </label>
+        <label>Мастер-промпт
+          <select id="quiz-prompt"></select>
+        </label>
       </div>
       <p>Типы вопросов:</p>
       <label class="check"><input type="checkbox" class="quiz-type" value="single" checked> Один правильный ответ</label>
@@ -178,6 +208,30 @@
         <button id="quiz-run">Создать тест</button>
         <span id="quiz-status" class="hint"></span>
       </div>
+
+      <details id="quiz-prompt-box" class="prompt-box">
+        <summary>Мастер-промпт: предпросмотр и управление</summary>
+        <pre id="quiz-prompt-preview" class="prompt-preview">-</pre>
+        <p class="hint">Предпросмотр обновляется при изменении настроек выше. Вместо метки {{TEXT}} показан условный текст — при генерации на её место встанет текст материала.</p>
+        <div class="row">
+          <button id="quiz-prompt-new" class="secondary">Новый промпт</button>
+          <button id="quiz-prompt-edit" class="secondary" disabled>Изменить выбранный</button>
+          <button id="quiz-prompt-delete" class="secondary" disabled>Удалить выбранный</button>
+        </div>
+        <form id="quiz-prompt-editor" hidden>
+          <label>Название
+            <input id="quiz-prompt-name" required placeholder="например, «Суровый тест»">
+          </label>
+          <label>Шаблон промпта
+            <textarea id="quiz-prompt-template" rows="12" required></textarea>
+          </label>
+          <p class="hint">Метки в шаблоне: <code>{{RULES}}</code> — правила, собранные из настроек выше; <code>{{TEXT}}</code> — текст материала (обязательна).</p>
+          <div class="row">
+            <button type="submit">Сохранить промпт</button>
+            <button type="button" id="quiz-prompt-cancel" class="secondary">Отмена</button>
+          </div>
+        </form>
+      </details>
     </div>
 
     <div class="card">
@@ -281,18 +335,48 @@
     <div class="card">
       <h2>Языковая модель (LLM)</h2>
       <p class="hint">Любой сервер с OpenAI-совместимым API: Ollama, LM Studio, llama.cpp, vLLM.</p>
+      <label>Где работает модель
+        <select id="llm-backend">
+          <option value="local">Локально (Ollama, LM Studio, llama.cpp, vLLM)</option>
+          <option value="remote">Удалённый сервис</option>
+        </select>
+      </label>
+
+      <fieldset id="llm-local">
+        <legend>Локальная модель</legend>
+        <div class="grid">
+          <label>Адрес, включая /v1
+            <input id="llm-local-url" placeholder="http://localhost:11434/v1">
+          </label>
+          <label>Модель
+            <input id="llm-local-model" list="llm-local-models" placeholder="qwen2.5:14b">
+            <select id="llm-local-model-select" hidden></select>
+            <datalist id="llm-local-models"></datalist>
+          </label>
+          <label>API-ключ (если нужен)
+            <input id="llm-local-key" type="password">
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset id="llm-remote" hidden>
+        <legend>Удалённый сервис</legend>
+        <div class="grid">
+          <label>Адрес, включая /v1
+            <input id="llm-remote-url" placeholder="https://api.example.com/v1">
+          </label>
+          <label>Модель
+            <input id="llm-remote-model" list="llm-remote-models" placeholder="gpt-4o-mini">
+            <select id="llm-remote-model-select" hidden></select>
+            <datalist id="llm-remote-models"></datalist>
+          </label>
+          <label>API-ключ
+            <input id="llm-remote-key" type="password">
+          </label>
+        </div>
+      </fieldset>
+
       <div class="grid">
-        <label>Адрес, включая /v1
-          <input id="llm-url" placeholder="http://192.168.1.20:11434/v1">
-        </label>
-        <label>Модель
-          <input id="llm-model" list="llm-models" placeholder="qwen2.5:14b">
-          <select id="llm-model-select" hidden></select>
-          <datalist id="llm-models"></datalist>
-        </label>
-        <label>API-ключ
-          <input id="llm-key" type="password">
-        </label>
         <label>Температура
           <input id="llm-temp" type="number" step="0.1" min="0" max="2">
         </label>

@@ -9,6 +9,7 @@ const state = {
   seconds: 0,
   chain: Promise.resolve(),
   settings: null,
+  settingsLoaded: false,
   sumIsHtml: false,
   quizIsHtml: false,
 };
@@ -392,6 +393,7 @@ $("sum-run").addEventListener("click", () =>
       extra_instructions: $("sum-extra").value,
     },
     template: $("sum-template").value,
+    prompt_id: $("sum-prompt").value,
   }), refreshLecture));
 
 $("sum-rerender").addEventListener("click", async () => {
@@ -427,6 +429,7 @@ $("quiz-run").addEventListener("click", () => {
       types,
     },
     template: $("quiz-template").value,
+    prompt_id: $("quiz-prompt").value,
   }), refreshLecture);
 });
 
@@ -439,6 +442,176 @@ $("quiz-rerender").addEventListener("click", async () => {
     toast(err.message, true);
   }
 });
+
+// ---------- мастер-промпты (конспект и тест) ----------
+
+const PROMPT_UI = {
+  summary: {
+    select: "sum-prompt", preview: "sum-prompt-preview", newBtn: "sum-prompt-new",
+    editBtn: "sum-prompt-edit", deleteBtn: "sum-prompt-delete", editor: "sum-prompt-editor",
+    name: "sum-prompt-name", template: "sum-prompt-template", cancel: "sum-prompt-cancel",
+  },
+  quiz: {
+    select: "quiz-prompt", preview: "quiz-prompt-preview", newBtn: "quiz-prompt-new",
+    editBtn: "quiz-prompt-edit", deleteBtn: "quiz-prompt-delete", editor: "quiz-prompt-editor",
+    name: "quiz-prompt-name", template: "quiz-prompt-template", cancel: "quiz-prompt-cancel",
+  },
+};
+
+state.prompts = { summary: [], quiz: [] };
+state.promptEdit = { summary: null, quiz: null }; // id редактируемого промпта (null — новый)
+state.defaultPrompts = { summary: "", quiz: "" };
+const previewTimers = { summary: null, quiz: null };
+
+function currentOptions(kind) {
+  if (kind === "summary") {
+    return {
+      length: $("sum-length").value,
+      include_offtopic: $("sum-offtopic").checked,
+      remove_filler: $("sum-filler").checked,
+      include_examples: $("sum-examples").checked,
+      extra_instructions: $("sum-extra").value,
+    };
+  }
+  return {
+    count: Number($("quiz-count").value),
+    difficulty: $("quiz-difficulty").value,
+    types: [...document.querySelectorAll(".quiz-type:checked")].map((c) => c.value),
+  };
+}
+
+function selectedPrompt(kind) {
+  const id = $(PROMPT_UI[kind].select).value;
+  return state.prompts[kind].find((p) => p.id === id) || null;
+}
+
+function schedulePromptPreview(kind) {
+  clearTimeout(previewTimers[kind]);
+  previewTimers[kind] = setTimeout(() => refreshPromptPreview(kind), 300);
+}
+
+async function refreshPromptPreview(kind) {
+  const ui = PROMPT_UI[kind];
+  const prompt = selectedPrompt(kind);
+  try {
+    const resp = await postJson("/prompt/preview", {
+      kind,
+      options: currentOptions(kind),
+      template: prompt ? prompt.template : "",
+    });
+    $(ui.preview).textContent = resp.prompt;
+  } catch (err) {
+    $(ui.preview).textContent = "Ошибка предпросмотра: " + err.message;
+  }
+}
+
+function updatePromptButtons(kind) {
+  const ui = PROMPT_UI[kind];
+  const custom = Boolean(selectedPrompt(kind));
+  $(ui.editBtn).disabled = !custom;
+  $(ui.deleteBtn).disabled = !custom;
+}
+
+async function loadPrompts(kind) {
+  const ui = PROMPT_UI[kind];
+  const resp = await api(`/prompts/${kind}`);
+  state.prompts[kind] = resp.prompts;
+  state.defaultPrompts[kind] = resp.default_template;
+  const select = $(ui.select);
+  select.innerHTML = "";
+  const builtin = document.createElement("option");
+  builtin.value = "";
+  builtin.textContent = "Встроенный (правила из настроек)";
+  select.append(builtin);
+  for (const p of resp.prompts) {
+    const option = document.createElement("option");
+    option.value = p.id;
+    option.textContent = p.name;
+    select.append(option);
+  }
+  const saved = localStorage.getItem(`masterPrompt:${kind}`);
+  if (saved && resp.prompts.some((p) => p.id === saved)) select.value = saved;
+  updatePromptButtons(kind);
+  refreshPromptPreview(kind);
+}
+
+function openPromptEditor(kind) {
+  const ui = PROMPT_UI[kind];
+  const prompt = selectedPrompt(kind);
+  state.promptEdit[kind] = prompt ? prompt.id : null;
+  $(ui.name).value = prompt ? prompt.name : "";
+  $(ui.template).value = prompt ? prompt.template : state.defaultPrompts[kind];
+  $(ui.editor).hidden = false;
+  $(ui.editor).scrollIntoView({ block: "nearest" });
+  $(ui.name).focus();
+}
+
+for (const kind of ["summary", "quiz"]) {
+  const ui = PROMPT_UI[kind];
+
+  $(ui.editor).addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $(ui.name).value.trim();
+    const template = $(ui.template).value;
+    if (!name) return toast("Введите название промпта", true);
+    try {
+      const editingId = state.promptEdit[kind];
+      const saved = editingId
+        ? (await putJson(`/prompts/${editingId}`, { name, template })).prompt
+        : (await postJson(`/prompts/${kind}`, { name, template })).prompt;
+      $(ui.editor).hidden = true;
+      await loadPrompts(kind);
+      $(ui.select).value = saved.id;
+      localStorage.setItem(`masterPrompt:${kind}`, saved.id);
+      updatePromptButtons(kind);
+      refreshPromptPreview(kind);
+      toast(`Мастер-промпт «${name}» сохранён`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $(ui.cancel).addEventListener("click", () => {
+    $(ui.editor).hidden = true;
+  });
+
+  $(ui.select).addEventListener("change", () => {
+    const id = $(ui.select).value;
+    if (id) localStorage.setItem(`masterPrompt:${kind}`, id);
+    else localStorage.removeItem(`masterPrompt:${kind}`);
+    updatePromptButtons(kind);
+    refreshPromptPreview(kind);
+  });
+
+  $(ui.newBtn).addEventListener("click", () => openPromptEditor(kind));
+  $(ui.editBtn).addEventListener("click", () => openPromptEditor(kind));
+
+  $(ui.deleteBtn).addEventListener("click", async () => {
+    const prompt = selectedPrompt(kind);
+    if (!prompt) return;
+    if (!confirm(`Удалить мастер-промпт «${prompt.name}»?`)) return;
+    try {
+      await api(`/prompts/${prompt.id}`, { method: "DELETE" });
+      localStorage.removeItem(`masterPrompt:${kind}`);
+      await loadPrompts(kind);
+      toast("Мастер-промпт удалён");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+}
+
+// Предпросмотр следует за изменениями настроек конспекта и теста
+for (const id of ["sum-length", "sum-offtopic", "sum-filler", "sum-examples", "sum-extra"]) {
+  $(id).addEventListener("input", () => schedulePromptPreview("summary"));
+  $(id).addEventListener("change", () => schedulePromptPreview("summary"));
+}
+for (const id of ["quiz-count", "quiz-difficulty"]) {
+  $(id).addEventListener("input", () => schedulePromptPreview("quiz"));
+  $(id).addEventListener("change", () => schedulePromptPreview("quiz"));
+}
+document.querySelectorAll(".quiz-type").forEach((cb) =>
+  cb.addEventListener("change", () => schedulePromptPreview("quiz")));
 
 // ---------- настройки ----------
 
@@ -470,6 +643,22 @@ $("whisper-unload").addEventListener("click", async () => {
   }
 });
 
+function updateLlmVisibility() {
+  const remote = $("llm-backend").value === "remote";
+  $("llm-local").hidden = remote;
+  $("llm-remote").hidden = !remote;
+}
+
+function llmEndpointIds(backend) {
+  return {
+    url: $(`llm-${backend}-url`),
+    model: $(`llm-${backend}-model`),
+    select: $(`llm-${backend}-model-select`),
+    datalist: $(`llm-${backend}-models`),
+    key: $(`llm-${backend}-key`),
+  };
+}
+
 async function loadSettings() {
   const s = await api("/settings");
   state.settings = s;
@@ -490,9 +679,14 @@ async function loadSettings() {
   $("tr-remote-url").value = s.transcription.remote.base_url;
   $("tr-remote-model").value = s.transcription.remote.model;
   $("tr-remote-key").value = s.transcription.remote.api_key;
-  $("llm-url").value = s.llm.base_url;
-  $("llm-model").value = s.llm.model;
-  $("llm-key").value = s.llm.api_key;
+  $("llm-backend").value = s.llm.backend || "local";
+  for (const mode of ["local", "remote"]) {
+    const ep = s.llm[mode] || {};
+    const ids = llmEndpointIds(mode);
+    ids.url.value = ep.base_url || "";
+    ids.model.value = ep.model || "";
+    ids.key.value = ep.api_key || "";
+  }
   $("llm-temp").value = s.llm.temperature;
   $("llm-chunk").value = s.llm.max_chunk_chars;
   // Нестандартный язык из config.yaml добавляем в список, чтобы не потерять
@@ -505,10 +699,13 @@ async function loadSettings() {
   }
   langSelect.value = s.language;
   updateAsrVisibility();
+  updateLlmVisibility();
+  state.settingsLoaded = true;
   loadWhisperStatus().catch((e) => toast(e.message, true));
 }
 
 $("tr-backend").addEventListener("change", updateAsrVisibility);
+$("llm-backend").addEventListener("change", updateLlmVisibility);
 
 // ---------- автосохранение настроек ----------
 
@@ -524,10 +721,17 @@ function collectSettings() {
   s.transcription.remote.base_url = $("tr-remote-url").value.trim();
   s.transcription.remote.model = $("tr-remote-model").value.trim();
   s.transcription.remote.api_key = $("tr-remote-key").value;
-  s.llm.base_url = $("llm-url").value.trim();
-  const modelSelect = $("llm-model-select");
-  s.llm.model = (modelSelect.hidden ? $("llm-model").value : modelSelect.value).trim();
-  s.llm.api_key = $("llm-key").value;
+  s.llm.backend = $("llm-backend").value;
+  for (const mode of ["local", "remote"]) {
+    const ids = llmEndpointIds(mode);
+    const modelSelect = ids.select;
+    s.llm[mode] = {
+      ...s.llm[mode],
+      base_url: ids.url.value.trim(),
+      model: (modelSelect.hidden ? ids.model.value : modelSelect.value).trim(),
+      api_key: ids.key.value,
+    };
+  }
   s.llm.temperature = Number($("llm-temp").value);
   s.llm.max_chunk_chars = Number($("llm-chunk").value);
   return s;
@@ -536,6 +740,7 @@ function collectSettings() {
 let saveTimer = null;
 
 function scheduleSettingsSave() {
+  if (!state.settingsLoaded) return; // форма ещё не заполнена значениями с диска
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveSettingsNow, 700); // пауза, чтобы не сохранять на каждом нажатии клавиши
 }
@@ -553,7 +758,9 @@ async function saveSettingsNow() {
 // Любое изменение в настройках сохраняется само
 for (const id of ["tr-backend", "tr-local-model", "tr-local-device", "tr-local-compute",
                   "tr-local-batch", "tr-local-vad", "tr-remote-url", "tr-remote-model",
-                  "tr-remote-key", "llm-url", "llm-model", "llm-model-select", "llm-key",
+                  "tr-remote-key", "llm-backend", "llm-local-url", "llm-local-model",
+                  "llm-local-model-select", "llm-local-key", "llm-remote-url",
+                  "llm-remote-model", "llm-remote-model-select", "llm-remote-key",
                   "llm-temp", "llm-chunk", "language"]) {
   $(id).addEventListener("input", scheduleSettingsSave);
   $(id).addEventListener("change", scheduleSettingsSave);
@@ -562,10 +769,17 @@ for (const id of ["tr-backend", "tr-local-model", "tr-local-device", "tr-local-c
 $("llm-check").addEventListener("click", async () => {
   const result = $("llm-check-result");
   result.textContent = "Проверка...";
+  const backend = $("llm-backend").value;
+  const ep = llmEndpointIds(backend);
   const body = {
     ...state.settings.llm,
-    base_url: $("llm-url").value.trim(),
-    api_key: $("llm-key").value,
+    backend,
+    [backend]: {
+      ...state.settings.llm[backend],
+      base_url: ep.url.value.trim(),
+      model: ep.model.value.trim(),
+      api_key: ep.key.value,
+    },
   };
   const resp = await postJson("/llm/check", body);
   if (!resp.ok) {
@@ -577,7 +791,7 @@ $("llm-check").addEventListener("click", async () => {
     return;
   }
   // Показываем выбор из всех моделей сервера выпадающим списком
-  const select = $("llm-model-select");
+  const select = ep.select;
   select.innerHTML = "";
   for (const model of resp.models) {
     const option = document.createElement("option");
@@ -585,27 +799,29 @@ $("llm-check").addEventListener("click", async () => {
     option.textContent = model;
     select.append(option);
   }
-  const current = $("llm-model").value.trim();
+  const current = ep.model.value.trim();
   if (current && resp.models.includes(current)) select.value = current;
-  $("llm-model").hidden = true;
+  ep.model.hidden = true;
   select.hidden = false;
   // Дублируем список и в подсказку обычного поля ввода
-  const list = $("llm-models");
-  list.innerHTML = "";
+  ep.datalist.innerHTML = "";
   for (const model of resp.models) {
     const option = document.createElement("option");
     option.value = model;
-    list.append(option);
+    ep.datalist.append(option);
   }
   result.textContent = `Подключение есть, доступно моделей: ${resp.models.length}`;
 });
 
 // При смене адреса или ключа список моделей устаревает — возвращаем поле ввода
-for (const id of ["llm-url", "llm-key"]) {
-  $(id).addEventListener("input", () => {
-    $("llm-model-select").hidden = true;
-    $("llm-model").hidden = false;
-  });
+for (const backend of ["local", "remote"]) {
+  const ids = llmEndpointIds(backend);
+  for (const field of [ids.url, ids.key]) {
+    field.addEventListener("input", () => {
+      ids.select.hidden = true;
+      ids.model.hidden = false;
+    });
+  }
 }
 
 // ---------- старт ----------
@@ -613,6 +829,8 @@ for (const id of ["llm-url", "llm-key"]) {
 async function init() {
   state.settings = await api("/settings");
   await loadTemplates();
+  await loadPrompts("summary");
+  await loadPrompts("quiz");
   await loadLectures();
 }
 

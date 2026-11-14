@@ -5,6 +5,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import yaml
+from fastapi.testclient import TestClient
+
+from app.main import create_app
 
 SUMMARY_JSON = {
     "title": "Тестовая лекция",
@@ -83,6 +86,11 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
+def client(app_env):
+    return TestClient(create_app())
+
+
+@pytest.fixture
 def fake_server():
     """Поднимает фейковый сервер на свободном порту. server.calls хранит все запросы."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -98,10 +106,13 @@ def fake_server():
 def app_env(tmp_path, monkeypatch, fake_server):
     """Временный config.yaml, указывающий на фейковый сервер, и отдельная папка лекций."""
     import app.config as config_module
+    import app.prompts as prompts_module
     import app.render as render_module
 
     # Пользовательские шаблоны тестов пишем во временную папку, а не в проект
     monkeypatch.setattr(render_module, "USER_TEMPLATES_DIR", tmp_path / "user_templates")
+    # Мастер-промпты тоже
+    monkeypatch.setattr(prompts_module, "PROMPTS_PATH", tmp_path / "prompts.json")
     base_url, server = fake_server
     lectures = tmp_path / "lectures"
     config = {

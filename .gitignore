@@ -15,6 +15,9 @@ lectures/
 # Конфиг с реальными ключами (образец: config.example.yaml)
 config.yaml
 
+# Мастер-промпты пользователя
+prompts.json
+
 # Прочее
 *.log
 .DS_Store

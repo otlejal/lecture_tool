@@ -32,10 +32,11 @@ def parse_json(text: str) -> dict:
 class LLMClient:
     def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
-        self.base = cfg.base_url.rstrip("/")
+        self.endpoint = cfg.active()
+        self.base = self.endpoint.base_url.rstrip("/")
 
     def _headers(self) -> dict:
-        return {"Authorization": f"Bearer {self.cfg.api_key or 'none'}", "Content-Type": "application/json"}
+        return {"Authorization": f"Bearer {self.endpoint.api_key or 'none'}", "Content-Type": "application/json"}
 
     def list_models(self) -> list[str]:
         resp = requests.get(self.base + "/models", headers=self._headers(), timeout=20)
@@ -44,7 +45,7 @@ class LLMClient:
 
     def chat(self, messages: list[dict], json_mode: bool = True) -> str:
         payload = {
-            "model": self.cfg.model,
+            "model": self.endpoint.model,
             "messages": messages,
             "temperature": self.cfg.temperature,
             "stream": False,
@@ -52,7 +53,7 @@ class LLMClient:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         resp = requests.post(self.base + "/chat/completions", headers=self._headers(),
-                             json=payload, timeout=self.cfg.timeout)
+                             json=payload, timeout=self.endpoint.timeout)
         if resp.status_code == 400 and json_mode:
             # Некоторые серверы не знают response_format - повторяем без него
             return self.chat(messages, json_mode=False)

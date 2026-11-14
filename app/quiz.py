@@ -4,6 +4,7 @@ from typing import Callable, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.llm import LLMClient
+from app.prompts import apply_template
 
 QuizType = Literal["single", "multiple", "true_false"]
 
@@ -37,6 +38,9 @@ SYSTEM_PROMPT = (
     "Ты составляешь тесты для студентов по материалу лекции на русском языке. "
     "Отвечай только корректным JSON без пояснений."
 )
+
+# Шаблон запроса по умолчанию: {{RULES}} — правила из настроек, {{TEXT}} — текст материала.
+DEFAULT_PROMPT_TEMPLATE = "{{RULES}}\n\nТекст:\n{{TEXT}}"
 
 
 class QuizOptions(BaseModel):
@@ -89,15 +93,10 @@ def _validate(data: dict, count: int) -> QuizData:
     return quiz
 
 
-def generate_quiz(text: str, opts: QuizOptions, llm: LLMClient,
-                  progress: Callable[[str], None] = lambda _: None) -> QuizData:
-    max_chars = llm.cfg.max_chunk_chars
-    if len(text) > max_chars:
-        text = text[:max_chars]
-        progress(MAX_SOURCE_CHARS_NOTE.format(max_chars))
-
+def build_rules(opts: QuizOptions) -> str:
+    """Блок инструкций для теста: собирается из настроек блока (количество, сложность, типы)."""
     types_text = ", ".join(TYPE_NAMES[t] for t in opts.types)
-    user_text = (
+    return (
         f"Составь тест из {opts.count} вопросов по тексту ниже.\n"
         f"Сложность: {DIFFICULTY_HINTS[opts.difficulty]}\n"
         f"Типы вопросов (распредели равномерно): {types_text}.\n"
@@ -107,12 +106,24 @@ def generate_quiz(text: str, opts: QuizOptions, llm: LLMClient,
         "- true_false: утверждение, поле options не нужно, correct = [0] если верно, [1] если неверно.\n"
         "- Индексы начинаются с 0. Вопросы только по содержанию текста.\n"
         "- В explanation коротко объясни правильный ответ.\n"
-        f"Верни JSON строго по схеме:\n{SCHEMA_HINT}\n\n"
-        f"Текст:\n{text}"
+        f"Верни JSON строго по схеме:\n{SCHEMA_HINT}"
     )
+
+
+def generate_quiz(text: str, opts: QuizOptions, llm: LLMClient,
+                  prompt_template: str = "",
+                  progress: Callable[[str], None] = lambda _: None) -> QuizData:
+    max_chars = llm.cfg.max_chunk_chars
+    if len(text) > max_chars:
+        text = text[:max_chars]
+        progress(MAX_SOURCE_CHARS_NOTE.format(max_chars))
+
+    rules = build_rules(opts)
+    template = prompt_template.strip() or DEFAULT_PROMPT_TEMPLATE
+    prompt = apply_template(template, rules, text)
     progress("Генерирую вопросы...")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_text},
+        {"role": "user", "content": prompt},
     ]
     return llm.chat_json(messages, validate=lambda d: _validate(d, opts.count))

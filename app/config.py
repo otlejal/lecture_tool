@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config.yaml"
@@ -30,13 +30,45 @@ class TranscriptionConfig(BaseModel):
     remote: RemoteWhisperConfig = Field(default_factory=RemoteWhisperConfig)
 
 
-class LLMConfig(BaseModel):
-    base_url: str = "http://localhost:11434/v1"
-    api_key: str = "none"
+class LLMEndpoint(BaseModel):
+    """Подключение к одному OpenAI-совместимому серверу LLM."""
+    base_url: str = ""
+    api_key: str = ""
     model: str = ""
     timeout: int = 900
+
+
+class LLMConfig(BaseModel):
+    backend: Literal["local", "remote"] = "local"
+    local: LLMEndpoint = Field(default_factory=lambda: LLMEndpoint(base_url="http://localhost:11434/v1"))
+    remote: LLMEndpoint = Field(default_factory=LLMEndpoint)
     temperature: float = 0.3
     max_chunk_chars: int = 20000
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_flat_config(cls, data):
+        """Старый плоский формат llm-конфига переносим в local/remote."""
+        if (
+            isinstance(data, dict)
+            and "local" not in data
+            and "remote" not in data
+            and "base_url" in data
+        ):
+            url = str(data.get("base_url") or "")
+            backend = "local" if ("localhost" in url or "127.0.0.1" in url) else "remote"
+            endpoint = {k: data.get(k) for k in ("base_url", "api_key", "model", "timeout")
+                        if data.get(k) is not None}
+            data = {
+                **data,
+                "backend": data.get("backend", backend),
+                "local": endpoint if backend == "local" else {},
+                "remote": endpoint if backend == "remote" else {},
+            }
+        return data
+
+    def active(self) -> LLMEndpoint:
+        return self.local if self.backend == "local" else self.remote
 
 
 class AppConfig(BaseModel):

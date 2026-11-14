@@ -29,11 +29,38 @@ def test_settings_roundtrip(client, app_env):
     settings = client.get("/api/settings").json()
     assert settings["transcription"]["backend"] == "remote"
 
-    settings["llm"]["model"] = "new-model"
+    settings["llm"]["local"]["model"] = "new-model"
     resp = client.put("/api/settings", json=settings)
     assert resp.status_code == 200
-    assert client.get("/api/settings").json()["llm"]["model"] == "new-model"
+    assert client.get("/api/settings").json()["llm"]["local"]["model"] == "new-model"
     assert "new-model" in app_env["config_path"].read_text(encoding="utf-8")
+
+
+def test_settings_blanks_do_not_wipe_saved_values(client, app_env):
+    """Автосохранение с пустыми полями не должно затирать сохранённые настройки."""
+    settings = client.get("/api/settings").json()
+    settings["llm"]["local"]["base_url"] = "http://llm.example/v1"
+    settings["llm"]["local"]["model"] = "good-model"
+    settings["llm"]["max_chunk_chars"] = 5000
+    settings["transcription"]["remote"]["base_url"] = "http://whisper.example/v1"
+    settings["transcription"]["remote"]["model"] = "good-whisper"
+    client.put("/api/settings", json=settings)
+
+    # Эмулируем гонку: поля формы пустые, а сохранение сработало
+    blanked = client.get("/api/settings").json()
+    blanked["llm"]["local"]["base_url"] = ""
+    blanked["llm"]["local"]["model"] = ""
+    blanked["llm"]["max_chunk_chars"] = 0
+    blanked["transcription"]["remote"]["base_url"] = ""
+    blanked["transcription"]["remote"]["model"] = ""
+    client.put("/api/settings", json=blanked)
+
+    restored = client.get("/api/settings").json()
+    assert restored["llm"]["local"]["base_url"] == "http://llm.example/v1"
+    assert restored["llm"]["local"]["model"] == "good-model"
+    assert restored["llm"]["max_chunk_chars"] == 5000
+    assert restored["transcription"]["remote"]["base_url"] == "http://whisper.example/v1"
+    assert restored["transcription"]["remote"]["model"] == "good-whisper"
 
 
 def test_llm_check(client, app_env):

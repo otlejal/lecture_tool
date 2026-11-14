@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import jobs, quiz, render, storage, summarizer, transcriber
+from app import jobs, prompts, quiz, render, storage, summarizer, transcriber
 from app.config import AppConfig, LLMConfig, load_config, lectures_root, save_config
 from app.llm import LLMClient
 
@@ -43,12 +43,25 @@ class SummaryIn(BaseModel):
     source: SourceIn = Field(default_factory=SourceIn)
     options: summarizer.SummaryOptions = Field(default_factory=summarizer.SummaryOptions)
     template: str = "default"
+    prompt_id: str = ""
 
 
 class QuizIn(BaseModel):
     source: SourceIn = Field(default_factory=lambda: SourceIn(type="summary"))
     options: quiz.QuizOptions = Field(default_factory=quiz.QuizOptions)
     template: str = "default"
+    prompt_id: str = ""
+
+
+class PromptIn(BaseModel):
+    name: str
+    template: str
+
+
+class PromptPreviewIn(BaseModel):
+    kind: Literal["summary", "quiz"]
+    options: dict = Field(default_factory=dict)
+    template: str = ""
 
 
 class RenderIn(BaseModel):
@@ -112,6 +125,21 @@ def get_settings() -> AppConfig:
 
 @router.put("/settings")
 def put_settings(cfg: AppConfig) -> AppConfig:
+    # Защита от затирания: если в форме поле пустое или нулевое (например, автосохранение
+    # сработало до загрузки значений в поля), оставляем ранее сохранённое значение.
+    current = load_config()
+    for mode in ("local", "remote"):
+        new, old = getattr(cfg.llm, mode), getattr(current.llm, mode)
+        if not new.base_url.strip():
+            new.base_url = old.base_url
+        if not new.model.strip():
+            new.model = old.model
+    if not cfg.transcription.remote.base_url.strip():
+        cfg.transcription.remote.base_url = current.transcription.remote.base_url
+    if not cfg.transcription.remote.model.strip():
+        cfg.transcription.remote.model = current.transcription.remote.model
+    if cfg.llm.max_chunk_chars <= 0:
+        cfg.llm.max_chunk_chars = current.llm.max_chunk_chars
     save_config(cfg)
     return cfg
 
@@ -217,8 +245,9 @@ def put_transcript(lecture_id: str, body: TranscriptIn):
 
 # ---------- конспект ----------
 
-def _job_summary(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str):
-    summary = summarizer.summarize(text, options, LLMClient(llm_cfg), progress)
+def _job_summary(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str,
+                 prompt_template: str = ""):
+    summary = summarizer.summarize(text, options, LLMClient(llm_cfg), prompt_template, progress)
     progress("Сохраняю конспект...")
     data = summary.model_dump()
     _write_json(folder / "summary.json", data)
@@ -234,7 +263,9 @@ def start_summary(lecture_id: str, body: SummaryIn):
     text = _source_text(folder, body.source)
     template = _template("summary", body.template)
     cfg = load_config()
-    job_id = jobs.start_job("summary", _job_summary, folder, text, body.options, cfg.llm, template)
+    prompt_template = prompts.template_for(body.prompt_id)
+    job_id = jobs.start_job("summary", _job_summary, folder, text, body.options, cfg.llm, template,
+                            prompt_template)
     return {"job_id": job_id}
 
 
@@ -259,8 +290,9 @@ def rerender_summary(lecture_id: str, body: RenderIn):
 
 # ---------- тест ----------
 
-def _job_quiz(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str):
-    data = quiz.generate_quiz(text, options, LLMClient(llm_cfg), progress).model_dump()
+def _job_quiz(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str,
+              prompt_template: str = ""):
+    data = quiz.generate_quiz(text, options, LLMClient(llm_cfg), prompt_template, progress).model_dump()
     progress("Сохраняю тест...")
     _write_json(folder / "quiz.json", data)
     (folder / "quiz.html").write_text(render.render_html(template, data), encoding="utf-8")
@@ -273,7 +305,9 @@ def start_quiz(lecture_id: str, body: QuizIn):
     text = _source_text(folder, body.source)
     template = _template("quiz", body.template)
     cfg = load_config()
-    job_id = jobs.start_job("quiz", _job_quiz, folder, text, body.options, cfg.llm, template)
+    prompt_template = prompts.template_for(body.prompt_id)
+    job_id = jobs.start_job("quiz", _job_quiz, folder, text, body.options, cfg.llm, template,
+                            prompt_template)
     return {"job_id": job_id}
 
 
@@ -294,6 +328,59 @@ def rerender_quiz(lecture_id: str, body: RenderIn):
     template = _template("quiz", body.template)
     (folder / "quiz.html").write_text(render.render_html(template, _read_json(path)), encoding="utf-8")
     return {"ok": True}
+
+
+# ---------- мастер-промпты ----------
+
+SAMPLE_TEXT = "[текст темы — подставится при генерации]"
+
+
+@router.get("/prompts/{kind}")
+def get_prompts(kind: Literal["summary", "quiz"]):
+    default = summarizer.DEFAULT_PROMPT_TEMPLATE if kind == "summary" else quiz.DEFAULT_PROMPT_TEMPLATE
+    return {"prompts": prompts.list_prompts(kind), "default_template": default}
+
+
+@router.post("/prompts/{kind}")
+def add_prompt(kind: Literal["summary", "quiz"], body: PromptIn):
+    try:
+        prompt = prompts.create(kind, body.name, body.template)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"prompt": prompt}
+
+
+@router.put("/prompts/{prompt_id}")
+def edit_prompt(prompt_id: str, body: PromptIn):
+    try:
+        return {"prompt": prompts.update(prompt_id, body.name, body.template)}
+    except KeyError:
+        raise HTTPException(404, "Мастер-промпт не найден")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/prompts/{prompt_id}")
+def remove_prompt(prompt_id: str):
+    if not prompts.delete(prompt_id):
+        raise HTTPException(404, "Мастер-промпт не найден")
+    return {"ok": True}
+
+
+@router.post("/prompt/preview")
+def preview_prompt(body: PromptPreviewIn):
+    """Собирает итоговый промпт из шаблона и текущих настроек блока (для предпросмотра)."""
+    default = summarizer.DEFAULT_PROMPT_TEMPLATE if body.kind == "summary" else quiz.DEFAULT_PROMPT_TEMPLATE
+    try:
+        if body.kind == "summary":
+            opts = summarizer.SummaryOptions.model_validate(body.options)
+            rules = summarizer.build_rules(opts)
+        else:
+            opts = quiz.QuizOptions.model_validate(body.options)
+            rules = quiz.build_rules(opts)
+    except Exception as exc:
+        raise HTTPException(400, f"Некорректные настройки промпта: {exc}")
+    return {"prompt": prompts.apply_template(body.template.strip() or default, rules, SAMPLE_TEXT)}
 
 
 # ---------- файлы, задачи, шаблоны ----------
