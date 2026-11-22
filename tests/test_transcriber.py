@@ -122,6 +122,63 @@ def test_float16_falls_back_to_int8(monkeypatch):
     assert attempts == ["float16", "int8", "int8"]
 
 
+def test_cuda_oom_unloads_model_and_reports(monkeypatch, tmp_path):
+    """После CUDA OOM модель нужно выгрузить, иначе следующая попытка падает так же."""
+    from app import transcriber
+    from app.config import LocalWhisperConfig
+
+    class FakeWhisperModel:
+        def transcribe(self, samples, **kwargs):
+            def segments():
+                raise RuntimeError("CUDA failed with error out of memory")
+                yield  # pragma: no cover
+
+            return segments(), None
+
+    monkeypatch.setattr(transcriber, "_load_model", lambda *args, **kwargs: FakeWhisperModel())
+    monkeypatch.setattr(transcriber, "decode_audio", lambda _path: [0.0] * 16000)
+    monkeypatch.setattr(transcriber, "_local_models", {})
+    monkeypatch.setattr(transcriber, "_local_pipelines", {})
+    monkeypatch.setattr(transcriber, "_unsupported_compute", set())
+
+    cfg = LocalWhisperConfig(model="tiny", device="cuda", compute_type="int8", batch_size=1)
+    whisper = transcriber.LocalWhisper(cfg, _silent)
+
+    with pytest.raises(RuntimeError, match="Видеопамять переполнена"):
+        whisper.transcribe(tmp_path / "audio.wav", "ru", _silent)
+
+    assert transcriber._local_models == {}
+    assert whisper.model is None
+    assert whisper.pipeline is None
+
+
+def test_vad_stage_is_reported(monkeypatch, tmp_path):
+    """Пока VAD ищет речь, интерфейс должен показывать понятный статус, а не тишину."""
+    from types import SimpleNamespace
+
+    from app import transcriber
+    from app.config import LocalWhisperConfig
+
+    class FakeWhisperModel:
+        def transcribe(self, samples, **kwargs):
+            return iter([SimpleNamespace(start=0.0, end=1.0, text=" Привет ")]), None
+
+    monkeypatch.setattr(transcriber, "_load_model", lambda *args, **kwargs: FakeWhisperModel())
+    monkeypatch.setattr(transcriber, "decode_audio", lambda _path: [0.0] * 16000)
+    monkeypatch.setattr(transcriber, "_local_models", {})
+    monkeypatch.setattr(transcriber, "_local_pipelines", {})
+    monkeypatch.setattr(transcriber, "_unsupported_compute", set())
+
+    messages = []
+    cfg = LocalWhisperConfig(model="tiny", device="cpu", compute_type="int8", batch_size=1, vad_filter=True)
+    whisper = transcriber.LocalWhisper(cfg, messages.append)
+
+    result = whisper.transcribe(tmp_path / "audio.wav", "ru", messages.append)
+
+    assert result == [{"start": 0.0, "end": 1.0, "text": "Привет"}]
+    assert "Ищу речь в записи..." in messages
+
+
 def test_save_transcript_skips_empty_segments(tmp_path: Path):
     save_transcript([{"start": 1, "end": 2, "text": ""}, {"start": 61, "end": 62, "text": "Текст"}], tmp_path)
     assert (tmp_path / "transcript.txt").read_text(encoding="utf-8") == "[00:01:01] Текст"

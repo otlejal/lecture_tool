@@ -25,6 +25,15 @@ _unsupported_compute: set[tuple[str, str]] = set()
 
 SAFE_COMPUTE_TYPE = "int8"  # работает и на CPU, и на старых GPU (Pascal, GTX 10xx)
 
+# Признаки сломанного CUDA-контекста: после такого сбоя модель нужно выгрузить,
+# иначе следующие попытки падают с той же ошибкой.
+_CUDA_FAILURES = ("out of memory", "invalid device ordinal", "cudaerrorinvaliddevice")
+
+
+def _is_cuda_failure(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _CUDA_FAILURES)
+
 
 def setup_cuda_dlls() -> None:
     """CUDA-версии CTranslate2 нужны cuBLAS и cuDNN 12 (cublas64_12.dll, cudnn64_*.dll).
@@ -150,6 +159,12 @@ class LocalWhisper:
                         "Установите их: .venv\\Scripts\\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 "
                         "и перезапустите приложение, либо выберите устройство CPU в настройках."
                     ) from exc
+                if cfg.device == "cuda" and _is_cuda_failure(exc):
+                    unload_local_model()
+                    raise RuntimeError(
+                        f"Видеопамять переполнена при загрузке модели «{cfg.model}». "
+                        "Выберите модель поменьше (например, medium) или точность int8."
+                    ) from exc
                 if compute_type in ("float16", "int8_float16") and (
                     "float16" in text or "compute type" in text or "compute_type" in text
                 ):
@@ -179,26 +194,43 @@ class LocalWhisper:
         progress("Декодирую аудио...")
         samples = decode_audio(audio)
         duration = len(samples) / SAMPLE_RATE
-        if self.pipeline is not None:
-            segments, _ = self.pipeline.transcribe(
-                samples,
-                language=language,
-                vad_filter=self.cfg.vad_filter,
-                batch_size=self.cfg.batch_size,
-            )
-        else:
-            segments, _ = self.model.transcribe(
-                samples,
-                language=language,
-                beam_size=5,
-                vad_filter=self.cfg.vad_filter,
-            )
-        result = []
-        for seg in segments:
-            result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
-            if duration:
-                progress(f"Распознано {min(100, int(100 * seg.end / duration))}% (до {fmt_time(seg.end)})")
-        return result
+        if self.cfg.vad_filter:
+            # VAD проходит по всей записи до первого сегмента: на длинных лекциях это
+            # десятки секунд, поэтому сообщаем, что приложение не зависло.
+            progress("Ищу речь в записи...")
+        try:
+            if self.pipeline is not None:
+                segments, _ = self.pipeline.transcribe(
+                    samples,
+                    language=language,
+                    vad_filter=self.cfg.vad_filter,
+                    batch_size=self.cfg.batch_size,
+                )
+            else:
+                segments, _ = self.model.transcribe(
+                    samples,
+                    language=language,
+                    beam_size=5,
+                    vad_filter=self.cfg.vad_filter,
+                )
+            result = []
+            for seg in segments:
+                result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
+                if duration:
+                    progress(f"Распознано {min(100, int(100 * seg.end / duration))}% (до {fmt_time(seg.end)})")
+            return result
+        except Exception as exc:
+            if self.cfg.device == "cuda" and _is_cuda_failure(exc):
+                # Сломанный CUDA-контекст не даст распознать ничего до перезапуска:
+                # выгружаем модель и просим повторить с меньшим батчем.
+                self.model = None
+                self.pipeline = None
+                unload_local_model()
+                raise RuntimeError(
+                    "Видеопамять переполнена. Модель выгружена — попробуйте снова "
+                    "с batch_size 2–4 или моделью поменьше."
+                ) from exc
+            raise
 
 
 class RemoteWhisper:
