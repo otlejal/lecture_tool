@@ -386,10 +386,10 @@
           </label>
           <label>Точность вычислений
             <select id="tr-local-compute">
-              <option value="float16">float16 (GPU — лучший выбор)</option>
-              <option value="int8_float16">int8_float16 (GPU, меньше памяти)</option>
-              <option value="int8">int8 (CPU — лучший выбор)</option>
-              <option value="float32">float32 (без ускорения)</option>
+              <option value="int8">int8 — универсально: CPU и старые GPU (GTX 10xx/16xx)</option>
+              <option value="float16">float16 — GPU с поддержкой FP16 (RTX 20xx и новее)</option>
+              <option value="int8_float16">int8_float16 — GPU с FP16, меньше памяти</option>
+              <option value="float32">float32 — максимальная совместимость, медленно</option>
             </select>
           </label>
           <label>Размер батча (ускоряет GPU и многоядерный CPU)
@@ -398,6 +398,10 @@
           <label class="check"><input type="checkbox" id="tr-local-vad" checked> Вырезать тишину (VAD):
             быстрее на длинных записях и без «галлюцинаций» на паузах</label>
         </div>
+        <p class="hint">⚠️ float16 и int8_float16 работают только на видеокартах с аппаратной поддержкой FP16
+          (GeForce RTX 20xx и новее). На старых GPU — GeForce GTX 10xx/16xx, например GTX 1050 Ti —
+          выбирайте <b>int8</b> или <b>float32</b>, иначе распознавание упадёт с ошибкой.
+          Если выбрать несовместимый режим, приложение автоматически перейдёт на int8.</p>
         <p class="hint">Модель скачивается автоматически при первом запуске. Для GPU (cuda) нужны библиотеки
           cuBLAS и cuDNN: .venv\Scripts\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12</p>
         <div class="grid">

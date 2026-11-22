@@ -12,7 +12,8 @@ CONFIG_PATH = ROOT / "config.yaml"
 class LocalWhisperConfig(BaseModel):
     model: str = "medium"
     device: str = "cuda"
-    compute_type: str = "float16"
+    # int8 работает и на CPU, и на старых GPU (GTX 10xx); float16 — только на GPU с поддержкой FP16 (RTX 20xx+)
+    compute_type: str = "int8"
     batch_size: int = Field(default=8, ge=1)
     vad_filter: bool = True
 

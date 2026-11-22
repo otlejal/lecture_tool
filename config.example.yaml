@@ -5,6 +5,7 @@ transcription:
   local:
     model: medium
     device: cpu
+    # int8 — универсально (CPU и старые GPU); float16 — только GPU с поддержкой FP16 (RTX 20xx+)
     compute_type: int8
   remote:
     base_url: http://localhost:8000/v1

@@ -20,6 +20,10 @@ SAMPLE_RATE = 16000
 _local_models: dict = {}
 _local_pipelines: dict = {}  # BatchedInferencePipeline для батчинга (когда batch_size > 1)
 _cuda_dlls_ready = False
+# Точности, которые уже не подошли видеокарте: повторно их не пробуем
+_unsupported_compute: set[tuple[str, str]] = set()
+
+SAFE_COMPUTE_TYPE = "int8"  # работает и на CPU, и на старых GPU (Pascal, GTX 10xx)
 
 
 def setup_cuda_dlls() -> None:
@@ -114,9 +118,20 @@ def unload_local_model() -> bool:
     return True
 
 
+def _load_model(model_name: str, device: str, compute_type: str):
+    """Загрузка faster-whisper. Вынесена отдельно, чтобы её было проще подменить в тестах."""
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model_name, device=device, compute_type=compute_type)
+
+
 class LocalWhisper:
     def __init__(self, cfg: LocalWhisperConfig, progress: Progress):
-        key = (cfg.model, cfg.device, cfg.compute_type)
+        compute_type = cfg.compute_type
+        if (cfg.device, compute_type) in _unsupported_compute:
+            compute_type = SAFE_COMPUTE_TYPE
+            progress(f"Видеокарта не поддерживает {cfg.compute_type}, использую {compute_type}.")
+        key = (cfg.model, cfg.device, compute_type)
         if key not in _local_models:
             if _local_models:
                 # В памяти держим только одну модель: перед загрузкой новой выгружаем старую
@@ -125,11 +140,9 @@ class LocalWhisper:
             if cfg.device == "cuda":
                 setup_cuda_dlls()
             progress(f"Загрузка модели whisper «{cfg.model}» (первый раз может занять несколько минут)...")
-            from faster_whisper import WhisperModel
-
             try:
-                _local_models[key] = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
-            except RuntimeError as exc:
+                _local_models[key] = _load_model(cfg.model, cfg.device, compute_type)
+            except (RuntimeError, ValueError) as exc:
                 text = str(exc).lower()
                 if "cublas" in text or "cudnn" in text:
                     raise RuntimeError(
@@ -137,7 +150,18 @@ class LocalWhisper:
                         "Установите их: .venv\\Scripts\\python.exe -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 "
                         "и перезапустите приложение, либо выберите устройство CPU в настройках."
                     ) from exc
-                raise
+                if compute_type in ("float16", "int8_float16") and (
+                    "float16" in text or "compute type" in text or "compute_type" in text
+                ):
+                    # Pascal и более старые карты (например, GTX 1050 Ti) не умеют float16:
+                    # вместо ошибки переключаемся на универсальный int8.
+                    progress(f"Видеокарта не поддерживает {compute_type}. Переключаюсь на int8 — "
+                             "его можно выбрать в настройках, чтобы убрать это сообщение.")
+                    key = (cfg.model, cfg.device, SAFE_COMPUTE_TYPE)
+                    _local_models[key] = _load_model(cfg.model, cfg.device, SAFE_COMPUTE_TYPE)
+                    _unsupported_compute.add((cfg.device, compute_type))
+                else:
+                    raise
         self.model = _local_models[key]
         # Батчинг в faster-whisper делается отдельным классом: ускорение в 2-3 раза на GPU/CPU.
         # batch_size не входит в ключ кэша модели, поэтому конвейер создаём/убираем при каждом использовании.

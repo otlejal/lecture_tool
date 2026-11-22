@@ -87,6 +87,41 @@ def test_make_transcriber_dispatch():
     assert type(remote).__name__ == "RemoteWhisper"
 
 
+def test_float16_falls_back_to_int8(monkeypatch):
+    """Старые GPU (например, GTX 1050 Ti) не умеют float16: загрузка должна сама перейти на int8."""
+    from app import transcriber
+    from app.config import LocalWhisperConfig
+
+    attempts = []
+
+    class FakeWhisperModel:
+        def __init__(self, model_name, device, compute_type):
+            attempts.append(compute_type)
+            if compute_type == "float16":
+                raise ValueError(
+                    "Requested float16 compute type, but the target device or backend "
+                    "do not support efficient float16 computation."
+                )
+
+    monkeypatch.setattr(transcriber, "_load_model", FakeWhisperModel)
+    monkeypatch.setattr(transcriber, "_local_models", {})
+    monkeypatch.setattr(transcriber, "_local_pipelines", {})
+    monkeypatch.setattr(transcriber, "_unsupported_compute", set())
+
+    messages = []
+    cfg = LocalWhisperConfig(model="tiny", device="cuda", compute_type="float16", batch_size=1)
+    transcriber.LocalWhisper(cfg, messages.append)
+
+    assert attempts == ["float16", "int8"]
+    assert ("cuda", "float16") in transcriber._unsupported_compute
+    assert any("int8" in message for message in messages)
+
+    # Повторная загрузка уже не тратит время на несовместимый режим
+    transcriber.unload_local_model()
+    transcriber.LocalWhisper(cfg, messages.append)
+    assert attempts == ["float16", "int8", "int8"]
+
+
 def test_save_transcript_skips_empty_segments(tmp_path: Path):
     save_transcript([{"start": 1, "end": 2, "text": ""}, {"start": 61, "end": 62, "text": "Текст"}], tmp_path)
     assert (tmp_path / "transcript.txt").read_text(encoding="utf-8") == "[00:01:01] Текст"
