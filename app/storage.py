@@ -118,6 +118,7 @@ def lecture_info(folder: Path) -> dict:
         "audio": audio_path(folder) is not None,
         "transcript": (folder / "transcript.txt").exists(),
         "summary": (folder / "summary.json").exists(),
+        "slides": (folder / "slides.json").exists(),
         "quiz": (folder / "quiz.json").exists(),
     }
     return meta

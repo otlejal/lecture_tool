@@ -32,7 +32,8 @@
   <nav>
     <button class="tab active" data-tab="record">1. Запись и текст</button>
     <button class="tab" data-tab="summary">2. Конспект</button>
-    <button class="tab" data-tab="quiz">3. Тест</button>
+    <button class="tab" data-tab="slides">3. Презентация</button>
+    <button class="tab" data-tab="quiz">4. Тест</button>
     <button class="tab" data-tab="settings">Настройки</button>
   </nav>
 </header>
@@ -165,7 +166,104 @@
     </div>
   </section>
 
-  <!-- ===== Блок 3: тест ===== -->
+  <!-- ===== Блок 3: презентация ===== -->
+  <section id="tab-slides" class="tab-panel">
+    <div class="card">
+      <h2>Источник материала</h2>
+      <label class="radio"><input type="radio" name="slides-source" value="lecture" checked> Конспект этой лекции (summary)</label>
+      <label class="radio"><input type="radio" name="slides-source" value="text"> Свой текст или готовый HTML-конспект</label>
+      <div id="slides-text-box" hidden>
+        <div class="row">
+          <input type="file" id="slides-file" accept=".txt,.html,.htm,.md">
+          <span class="hint">Можно загрузить конспект в формате .html — текст берётся из него автоматически.</span>
+        </div>
+        <textarea id="slides-text" rows="8" placeholder="Или вставьте текст сюда"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Настройки презентации</h2>
+      <div class="grid">
+        <label>Количество слайдов
+          <input type="number" id="slides-count" min="3" max="40" value="10">
+        </label>
+        <label>Оформление
+          <select id="slides-theme">
+            <option value="auto">Авто — подберёт ИИ</option>
+            <option value="editorial">Редакционная — тёплая бумага, антиква</option>
+            <option value="midnight">Ночная — тёмный фон, неоновый акцент</option>
+            <option value="nordic">Северная — светлая и сдержанная</option>
+            <option value="bold">Контрастная — чёрный и кислотный акцент</option>
+            <option value="academic">Академическая — как конспект, синяя</option>
+          </select>
+        </label>
+        <label>Шаблон оформления
+          <select id="slides-template"></select>
+        </label>
+        <label>Мастер-промпт
+          <select id="slides-prompt"></select>
+        </label>
+      </div>
+      <label>Для кого презентация и зачем
+        <input id="slides-audience" placeholder="например: студенты 1 курса, повторение темы перед зачётом">
+      </label>
+      <label>Дополнительные пожелания
+        <textarea id="slides-extra" rows="3" placeholder="Например: больше цифр и примеров, меньше текста, добавить слайд с итогами"></textarea>
+      </label>
+      <div class="row">
+        <button id="slides-run">Сделать презентацию</button>
+        <span id="slides-status" class="hint"></span>
+      </div>
+
+      <details id="slides-prompt-box" class="prompt-box">
+        <summary>Мастер-промпт: предпросмотр и управление</summary>
+        <pre id="slides-prompt-preview" class="prompt-preview">-</pre>
+        <p class="hint">Предпросмотр обновляется при изменении настроек выше. Вместо метки {{TEXT}} показан условный текст — при генерации на её место встанет текст материала.</p>
+        <div class="row">
+          <button id="slides-prompt-new" class="secondary">Новый промпт</button>
+          <button id="slides-prompt-edit" class="secondary" disabled>Изменить выбранный</button>
+          <button id="slides-prompt-delete" class="secondary" disabled>Удалить выбранный</button>
+        </div>
+        <form id="slides-prompt-editor" hidden>
+          <label>Название
+            <input id="slides-prompt-name" required placeholder="например, «Коротко и наглядно»">
+          </label>
+          <label>Шаблон промпта
+            <textarea id="slides-prompt-template" rows="12" required></textarea>
+          </label>
+          <p class="hint">Метки в шаблоне: <code>{{RULES}}</code> — правила, собранные из настроек выше; <code>{{TEXT}}</code> — текст материала (обязательна).</p>
+          <div class="row">
+            <button type="submit">Сохранить промпт</button>
+            <button type="button" id="slides-prompt-cancel" class="secondary">Отмена</button>
+          </div>
+        </form>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Результат</h2>
+      <div class="row">
+        <button id="slides-rerender" class="secondary">Перерисовать выбранным шаблоном</button>
+        <a id="slides-download" class="link" download hidden>Скачать slides.html</a>
+        <span class="hint">Листать: ← → или пробел, колесо мыши, свайп. S — заметки выступающего, F — во весь экран.</span>
+      </div>
+      <iframe id="slides-preview" class="deck-preview" title="Презентация"></iframe>
+    </div>
+
+    <div class="card">
+      <h2>Свой шаблон презентации</h2>
+      <p class="hint">Требования такие же, как у шаблона конспекта: метка <code>{{DATA}}</code> внутри
+        <code>&lt;script id="data" type="application/json"&gt;</code>. Стандартный шаблон:
+        <code>templates/slides_default.html</code> — в нём уже есть навигация, анимация и подгонка под экран.</p>
+      <div class="row">
+        <input type="file" id="slides-tpl-file" accept=".html,.htm">
+        <input id="slides-tpl-name" placeholder="Имя шаблона, например «ночь»">
+        <button id="slides-tpl-save" class="secondary">Сохранить шаблон</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Блок 4: тест ===== -->
   <section id="tab-quiz" class="tab-panel">
     <div class="card">
       <h2>Источник материала</h2>

@@ -10,7 +10,7 @@ from app.config import ROOT
 TEMPLATES_DIR = ROOT / "templates"
 USER_TEMPLATES_DIR = TEMPLATES_DIR / "user"
 PLACEHOLDER = "{{DATA}}"
-KINDS = ("summary", "quiz")
+KINDS = ("summary", "quiz", "slides")
 NAME_PATTERN = re.compile(r"[\w\-]+")
 
 

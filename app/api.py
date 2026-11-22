@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import jobs, prompts, quiz, render, storage, summarizer, transcriber
+from app import jobs, prompts, quiz, render, slides, storage, summarizer, transcriber
 from app.config import AppConfig, LLMConfig, load_config, lectures_root, save_config
 from app.llm import LLMClient
 
@@ -18,6 +18,8 @@ DOWNLOADABLE = {
     "transcript.txt": "text/plain; charset=utf-8",
     "summary.html": "text/html; charset=utf-8",
     "summary.json": "application/json; charset=utf-8",
+    "slides.html": "text/html; charset=utf-8",
+    "slides.json": "application/json; charset=utf-8",
     "quiz.html": "text/html; charset=utf-8",
     "quiz.json": "application/json; charset=utf-8",
 }
@@ -53,13 +55,20 @@ class QuizIn(BaseModel):
     prompt_id: str = ""
 
 
+class SlidesIn(BaseModel):
+    source: SourceIn = Field(default_factory=lambda: SourceIn(type="summary"))
+    options: slides.SlidesOptions = Field(default_factory=slides.SlidesOptions)
+    template: str = "default"
+    prompt_id: str = ""
+
+
 class PromptIn(BaseModel):
     name: str
     template: str
 
 
 class PromptPreviewIn(BaseModel):
-    kind: Literal["summary", "quiz"]
+    kind: Literal["summary", "quiz", "slides"]
     options: dict = Field(default_factory=dict)
     template: str = ""
 
@@ -288,6 +297,48 @@ def rerender_summary(lecture_id: str, body: RenderIn):
     return {"ok": True}
 
 
+# ---------- презентация ----------
+
+def _job_slides(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str,
+                prompt_template: str = ""):
+    data = slides.generate_slides(text, options, LLMClient(llm_cfg), prompt_template, progress).model_dump()
+    progress("Сохраняю презентацию...")
+    _write_json(folder / "slides.json", data)
+    (folder / "slides.html").write_text(render.render_html(template, data), encoding="utf-8")
+    return {"slides": len(data["slides"])}
+
+
+@router.post("/lectures/{lecture_id}/slides")
+def start_slides(lecture_id: str, body: SlidesIn):
+    folder = _folder(lecture_id)
+    text = _source_text(folder, body.source)
+    template = _template("slides", body.template)
+    cfg = load_config()
+    prompt_template = prompts.template_for(body.prompt_id)
+    job_id = jobs.start_job("slides", _job_slides, folder, text, body.options, cfg.llm, template,
+                            prompt_template)
+    return {"job_id": job_id}
+
+
+@router.get("/lectures/{lecture_id}/slides")
+def get_slides(lecture_id: str):
+    path = _folder(lecture_id) / "slides.json"
+    if not path.exists():
+        raise HTTPException(404, "Презентация ещё не создана")
+    return _read_json(path)
+
+
+@router.post("/lectures/{lecture_id}/slides/render")
+def rerender_slides(lecture_id: str, body: RenderIn):
+    folder = _folder(lecture_id)
+    path = folder / "slides.json"
+    if not path.exists():
+        raise HTTPException(404, "Презентация ещё не создана")
+    template = _template("slides", body.template)
+    (folder / "slides.html").write_text(render.render_html(template, _read_json(path)), encoding="utf-8")
+    return {"ok": True}
+
+
 # ---------- тест ----------
 
 def _job_quiz(progress, folder: Path, text: str, options, llm_cfg: LLMConfig, template: str,
@@ -334,15 +385,20 @@ def rerender_quiz(lecture_id: str, body: RenderIn):
 
 SAMPLE_TEXT = "[текст темы — подставится при генерации]"
 
+DEFAULT_PROMPTS = {
+    "summary": summarizer.DEFAULT_PROMPT_TEMPLATE,
+    "quiz": quiz.DEFAULT_PROMPT_TEMPLATE,
+    "slides": slides.DEFAULT_PROMPT_TEMPLATE,
+}
+
 
 @router.get("/prompts/{kind}")
-def get_prompts(kind: Literal["summary", "quiz"]):
-    default = summarizer.DEFAULT_PROMPT_TEMPLATE if kind == "summary" else quiz.DEFAULT_PROMPT_TEMPLATE
-    return {"prompts": prompts.list_prompts(kind), "default_template": default}
+def get_prompts(kind: Literal["summary", "quiz", "slides"]):
+    return {"prompts": prompts.list_prompts(kind), "default_template": DEFAULT_PROMPTS[kind]}
 
 
 @router.post("/prompts/{kind}")
-def add_prompt(kind: Literal["summary", "quiz"], body: PromptIn):
+def add_prompt(kind: Literal["summary", "quiz", "slides"], body: PromptIn):
     try:
         prompt = prompts.create(kind, body.name, body.template)
     except ValueError as exc:
@@ -370,11 +426,14 @@ def remove_prompt(prompt_id: str):
 @router.post("/prompt/preview")
 def preview_prompt(body: PromptPreviewIn):
     """Собирает итоговый промпт из шаблона и текущих настроек блока (для предпросмотра)."""
-    default = summarizer.DEFAULT_PROMPT_TEMPLATE if body.kind == "summary" else quiz.DEFAULT_PROMPT_TEMPLATE
+    default = DEFAULT_PROMPTS[body.kind]
     try:
         if body.kind == "summary":
             opts = summarizer.SummaryOptions.model_validate(body.options)
             rules = summarizer.build_rules(opts)
+        elif body.kind == "slides":
+            opts = slides.SlidesOptions.model_validate(body.options)
+            rules = slides.build_rules(opts)
         else:
             opts = quiz.QuizOptions.model_validate(body.options)
             rules = quiz.build_rules(opts)

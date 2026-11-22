@@ -39,6 +39,21 @@ QUIZ_JSON = {
     ],
 }
 
+SLIDES_JSON = {
+    "title": "Презентация о тестах",
+    "subtitle": "Как проверять код",
+    "theme": "nordic",
+    "slides": [
+        {"layout": "title", "heading": "Тесты в разработке", "subheading": "Зачем и как",
+         "notes": "Представьтесь и назовите тему."},
+        {"layout": "bullets", "heading": "Зачем нужен тест",
+         "bullets": ["Проверяет поведение кода", "Ловит ошибки до релиза"],
+         "notes": "Разберите два смысла теста."},
+        {"layout": "statement", "heading": "Тест — это страховка, а не украшение",
+         "notes": "Подведите итог."},
+    ],
+}
+
 FAKE_SEGMENTS = [
     {"start": 0.0, "end": 3.5, "text": "Здравствуйте, коллеги."},
     {"start": 3.5, "end": 9.0, "text": "Сегодня поговорим о тестах."},
@@ -79,7 +94,13 @@ class _Handler(BaseHTTPRequestHandler):
             # Тип запроса ищем во всей истории: при повторе последнее сообщение уже другое
             history = " ".join(m["content"] for m in payload["messages"])
             self.server.calls.append(("chat", prompt))
-            content = json.dumps(QUIZ_JSON if "Составь тест" in history else SUMMARY_JSON, ensure_ascii=False)
+            if "презентац" in history:
+                payload_json = SLIDES_JSON
+            elif "Составь тест" in history:
+                payload_json = QUIZ_JSON
+            else:
+                payload_json = SUMMARY_JSON
+            content = json.dumps(payload_json, ensure_ascii=False)
             self._send({"choices": [{"message": {"role": "assistant", "content": content}}]})
             return
         self._send({"error": "not found"}, 404)

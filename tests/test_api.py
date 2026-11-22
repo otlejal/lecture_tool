@@ -75,7 +75,8 @@ def test_create_list_and_get_lecture(client):
     listed = client.get("/api/lectures").json()
     assert any(item["id"] == lecture_id and item["title"] == "Физика" for item in listed)
     info = client.get(f"/api/lectures/{lecture_id}").json()
-    assert info["stages"] == {"audio": False, "transcript": False, "summary": False, "quiz": False}
+    assert info["stages"] == {"audio": False, "transcript": False, "summary": False,
+                              "slides": False, "quiz": False}
 
 
 def test_unknown_lecture_is_404(client):
@@ -116,7 +117,19 @@ def test_full_pipeline(client, app_env):
     assert "Тестовая лекция" in summary_html.text
     assert "{{DATA}}" not in summary_html.text
 
-    # 3. Тест из конспекта этой лекции
+    # 3. Презентация из конспекта этой лекции
+    job = _wait(client, client.post(f"/api/lectures/{lecture_id}/slides",
+                                    json={"source": {"type": "summary"},
+                                          "options": {"count": 3, "theme": "auto"}}).json()["job_id"])
+    assert job["status"] == "done", job
+    slides_json = client.get(f"/api/lectures/{lecture_id}/slides").json()
+    assert len(slides_json["slides"]) == 3
+    slides_html = client.get(f"/api/lectures/{lecture_id}/files/slides.html")
+    assert slides_html.status_code == 200
+    assert "Презентация о тестах" in slides_html.text
+    assert "{{DATA}}" not in slides_html.text
+
+    # 4. Тест из конспекта этой лекции
     job = _wait(client, client.post(f"/api/lectures/{lecture_id}/quiz",
                                     json={"source": {"type": "summary"},
                                           "options": {"count": 2, "types": ["single", "true_false"]}}).json()["job_id"])
@@ -127,6 +140,41 @@ def test_full_pipeline(client, app_env):
 
     info = client.get(f"/api/lectures/{lecture_id}").json()
     assert all(info["stages"].values())
+
+
+def test_slides_from_pasted_text_and_rerender(client):
+    lecture_id = _new_lecture(client)
+    job = _wait(client, client.post(f"/api/lectures/{lecture_id}/slides",
+                                    json={"source": {"type": "text", "text": "Материал про теорему"},
+                                          "options": {"count": 3}}).json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["slides"] == 3
+    html = client.get(f"/api/lectures/{lecture_id}/files/slides.html").text
+    assert "Презентация о тестах" in html
+
+    template = '<script id="data" type="application/json">{{DATA}}</script>MARK'
+    assert client.post("/api/templates/slides", json={"name": "mark", "content": template}).status_code == 200
+    assert client.post(f"/api/lectures/{lecture_id}/slides/render",
+                       json={"template": "mark"}).status_code == 200
+    assert "MARK" in client.get(f"/api/lectures/{lecture_id}/files/slides.html").text
+
+
+def test_slides_need_summary_first(client):
+    lecture_id = _new_lecture(client)
+    resp = client.post(f"/api/lectures/{lecture_id}/slides", json={})
+    assert resp.status_code == 400
+    assert "Конспект" in resp.json()["detail"]
+
+
+def test_slides_from_pasted_html_summary(client):
+    lecture_id = _new_lecture(client)
+    html = ('<html><body><script id="data" type="application/json">'
+            '{"title": "Чужой конспект", "sections": [{"heading": "Раздел", "points": ["Пункт"]}]}'
+            "</script></body></html>")
+    job = _wait(client, client.post(f"/api/lectures/{lecture_id}/slides",
+                                    json={"source": {"type": "text", "text": html, "is_html": True},
+                                          "options": {"count": 3}}).json()["job_id"])
+    assert job["status"] == "done", job
 
 
 def test_quiz_from_pasted_html_summary(client):

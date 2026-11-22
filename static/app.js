@@ -11,6 +11,7 @@ const state = {
   settings: null,
   settingsLoaded: false,
   sumIsHtml: false,
+  slidesIsHtml: false,
   quizIsHtml: false,
 };
 
@@ -136,7 +137,8 @@ async function loadLectures(preferId) {
 async function refreshLecture() {
   const hasLecture = Boolean(state.lectureId);
   for (const id of ["rec-start", "upload-audio", "save-transcript", "sum-run", "sum-rerender",
-                    "sum-tpl-save", "quiz-run", "quiz-rerender", "delete-lecture"]) {
+                    "sum-tpl-save", "slides-run", "slides-rerender", "slides-tpl-save",
+                    "quiz-run", "quiz-rerender", "delete-lecture"]) {
     $(id).disabled = !hasLecture;
   }
   $("asr-mode").textContent = describeAsr();
@@ -144,6 +146,7 @@ async function refreshLecture() {
     $("transcribe").disabled = true;
     $("transcript").value = "";
     $("sum-preview").src = "about:blank";
+    $("slides-preview").src = "about:blank";
     $("quiz-preview").src = "about:blank";
     return;
   }
@@ -153,8 +156,10 @@ async function refreshLecture() {
   $("transcript").value = (await api(`/lectures/${state.lectureId}/transcript`)).text;
   setLink("download-transcript", info.stages.transcript, "transcript.txt");
   setLink("sum-download", info.stages.summary, "summary.html");
+  setLink("slides-download", info.stages.slides, "slides.html");
   setLink("quiz-download", info.stages.quiz, "quiz.html");
   $("sum-preview").src = info.stages.summary ? fileUrl("summary.html") : "about:blank";
+  $("slides-preview").src = info.stages.slides ? fileUrl("slides.html") : "about:blank";
   $("quiz-preview").src = info.stages.quiz ? fileUrl("quiz.html") : "about:blank";
 }
 
@@ -182,7 +187,7 @@ $("new-lecture").addEventListener("click", async () => {
 $("delete-lecture").addEventListener("click", async () => {
   if (!state.lectureId) return;
   const title = $("lecture-select").selectedOptions[0]?.textContent || state.lectureId;
-  if (!confirm(`Удалить тему «${title}» со всеми файлами (аудио, конспект, тест)?`)) return;
+  if (!confirm(`Удалить тему «${title}» со всеми файлами (аудио, конспект, презентация, тест)?`)) return;
   try {
     await api(`/lectures/${state.lectureId}`, { method: "DELETE" });
     localStorage.removeItem("lectureId");
@@ -311,7 +316,7 @@ $("save-transcript").addEventListener("click", async () => {
   }
 });
 
-// ---------- общие для блоков 2 и 3 ----------
+// ---------- общие для блоков 2, 3 и 4 ----------
 
 function bindTextFile(fileInput, textarea, setHtmlFlag) {
   fileInput.addEventListener("change", () => {
@@ -338,9 +343,10 @@ function bindSourceSwitch(radioName, box) {
 }
 
 async function loadTemplates() {
-  for (const kind of ["summary", "quiz"]) {
+  const selects = { summary: "sum-template", slides: "slides-template", quiz: "quiz-template" };
+  for (const [kind, selectId] of Object.entries(selects)) {
     const { names } = await api(`/templates/${kind}`);
-    const select = kind === "summary" ? $("sum-template") : $("quiz-template");
+    const select = $(selectId);
     const previous = select.value;
     select.innerHTML = "";
     for (const name of names) {
@@ -406,7 +412,42 @@ $("sum-rerender").addEventListener("click", async () => {
   }
 });
 
-// ---------- блок 3: тест ----------
+// ---------- блок 3: презентация ----------
+
+function slidesSource() {
+  const kind = document.querySelector('input[name="slides-source"]:checked').value;
+  if (kind === "lecture") return { type: "summary" };
+  return { type: "text", text: $("slides-text").value, is_html: state.slidesIsHtml };
+}
+
+bindSourceSwitch("slides-source", "slides-text-box");
+bindTextFile($("slides-file"), $("slides-text"), (v) => (state.slidesIsHtml = v));
+bindTemplateUpload("slides", "slides-tpl-file", "slides-tpl-name", "slides-tpl-save", "slides-template");
+
+$("slides-run").addEventListener("click", () =>
+  runJob($("slides-run"), $("slides-status"), () => postJson(`/lectures/${state.lectureId}/slides`, {
+    source: slidesSource(),
+    options: {
+      count: Number($("slides-count").value),
+      theme: $("slides-theme").value,
+      audience: $("slides-audience").value,
+      extra_instructions: $("slides-extra").value,
+    },
+    template: $("slides-template").value,
+    prompt_id: $("slides-prompt").value,
+  }), refreshLecture));
+
+$("slides-rerender").addEventListener("click", async () => {
+  try {
+    await postJson(`/lectures/${state.lectureId}/slides/render`, { template: $("slides-template").value });
+    toast("Презентация перерисована");
+    await refreshLecture();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+// ---------- блок 4: тест ----------
 
 function quizSource() {
   const kind = document.querySelector('input[name="quiz-source"]:checked').value;
@@ -456,12 +497,17 @@ const PROMPT_UI = {
     editBtn: "quiz-prompt-edit", deleteBtn: "quiz-prompt-delete", editor: "quiz-prompt-editor",
     name: "quiz-prompt-name", template: "quiz-prompt-template", cancel: "quiz-prompt-cancel",
   },
+  slides: {
+    select: "slides-prompt", preview: "slides-prompt-preview", newBtn: "slides-prompt-new",
+    editBtn: "slides-prompt-edit", deleteBtn: "slides-prompt-delete", editor: "slides-prompt-editor",
+    name: "slides-prompt-name", template: "slides-prompt-template", cancel: "slides-prompt-cancel",
+  },
 };
 
-state.prompts = { summary: [], quiz: [] };
-state.promptEdit = { summary: null, quiz: null }; // id редактируемого промпта (null — новый)
-state.defaultPrompts = { summary: "", quiz: "" };
-const previewTimers = { summary: null, quiz: null };
+state.prompts = { summary: [], quiz: [], slides: [] };
+state.promptEdit = { summary: null, quiz: null, slides: null }; // id редактируемого промпта (null — новый)
+state.defaultPrompts = { summary: "", quiz: "", slides: "" };
+const previewTimers = { summary: null, quiz: null, slides: null };
 
 function currentOptions(kind) {
   if (kind === "summary") {
@@ -471,6 +517,14 @@ function currentOptions(kind) {
       remove_filler: $("sum-filler").checked,
       include_examples: $("sum-examples").checked,
       extra_instructions: $("sum-extra").value,
+    };
+  }
+  if (kind === "slides") {
+    return {
+      count: Number($("slides-count").value),
+      theme: $("slides-theme").value,
+      audience: $("slides-audience").value,
+      extra_instructions: $("slides-extra").value,
     };
   }
   return {
@@ -546,7 +600,7 @@ function openPromptEditor(kind) {
   $(ui.name).focus();
 }
 
-for (const kind of ["summary", "quiz"]) {
+for (const kind of ["summary", "quiz", "slides"]) {
   const ui = PROMPT_UI[kind];
 
   $(ui.editor).addEventListener("submit", async (e) => {
@@ -612,6 +666,12 @@ for (const id of ["quiz-count", "quiz-difficulty"]) {
 }
 document.querySelectorAll(".quiz-type").forEach((cb) =>
   cb.addEventListener("change", () => schedulePromptPreview("quiz")));
+
+// Предпросмотр следует за изменениями настроек презентации
+for (const id of ["slides-count", "slides-theme", "slides-audience", "slides-extra"]) {
+  $(id).addEventListener("input", () => schedulePromptPreview("slides"));
+  $(id).addEventListener("change", () => schedulePromptPreview("slides"));
+}
 
 // ---------- настройки ----------
 
@@ -830,6 +890,7 @@ async function init() {
   state.settings = await api("/settings");
   await loadTemplates();
   await loadPrompts("summary");
+  await loadPrompts("slides");
   await loadPrompts("quiz");
   await loadLectures();
 }

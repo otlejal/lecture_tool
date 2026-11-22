@@ -65,6 +65,17 @@ def test_preview_uses_custom_template(client, app_env):
     assert prompt.endswith("<<< [текст темы — подставится при генерации]")
 
 
+def test_preview_slides_reflects_options(client, app_env):
+    resp = client.post("/api/prompt/preview", json={
+        "kind": "slides",
+        "options": {"count": 7, "theme": "midnight", "audience": "студенты 1 курса"},
+    })
+    prompt = resp.json()["prompt"]
+    assert "ровно 7" in prompt
+    assert "midnight" in prompt
+    assert "студенты 1 курса" in prompt
+
+
 def test_bad_options_rejected_in_preview(client, app_env):
     resp = client.post("/api/prompt/preview", json={
         "kind": "quiz",

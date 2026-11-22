@@ -123,6 +123,9 @@ iframe {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
+/* Презентация: 16:9 и выше, чтобы слайд был виден целиком */
+iframe.deck-preview { height: min(70vh, 620px); }
+
 fieldset {
   border: 1px solid var(--border);
   border-radius: 8px;
